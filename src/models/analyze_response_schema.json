@@ -1,0 +1,111 @@
+{
+	"$schema": "http://json-schema.org/draft-07/schema#",
+	"title": "AnalyzeResponse",
+	"description": "Schema for analyzing camera footage activities",
+	"type": "object",
+	"properties": {
+		"output": {
+			"type": "object",
+			"description": "The localized analysis output containing risk assessment details",
+			"properties": {
+				"en": {
+					"type": "object",
+					"description": "English localization of the analysis output",
+					"properties": {
+						"risk_score": {
+							"type": "integer",
+							"description": "The score rating for the activity, between 0 and 100.",
+							"minimum": 0,
+							"maximum": 100
+						},
+						"reason": {
+							"type": "string",
+							"description": "The reason for the score"
+						},
+						"confidence": {
+							"type": "number",
+							"description": "The confidence of the score",
+							"minimum": 0.0,
+							"maximum": 1.0
+						},
+						"timestamp": {
+							"type": "string",
+							"description": "The timestamp of the activity"
+						},
+						"image_url": {
+							"type": "string",
+							"description": "The source url of the image that you analyse, return the url from the input"
+						},
+						"image_description": {
+							"type": "string",
+							"description": "The description of the image, if there is nothing to describe, return 'No description', describe within 25 words",
+							"maxLength": 200
+						}
+					},
+					"required": [
+						"risk_score",
+						"reason",
+						"confidence",
+						"timestamp",
+						"image_url",
+						"image_description"
+					],
+					"additionalProperties": false
+				},
+				"zh-CN": {
+					"type": "object",
+					"description": "Chinese (Simplified) localization of the analysis output",
+					"properties": {
+						"risk_score": {
+							"type": "integer",
+							"description": "The score rating for the activity, between 0 and 100.",
+							"minimum": 0,
+							"maximum": 100
+						},
+						"reason": {
+							"type": "string",
+							"description": "The reason for the score"
+						},
+						"confidence": {
+							"type": "number",
+							"description": "The confidence of the score",
+							"minimum": 0.0,
+							"maximum": 1.0
+						},
+						"timestamp": {
+							"type": "string",
+							"description": "The timestamp of the activity"
+						},
+						"image_url": {
+							"type": "string",
+							"description": "The source url of the image that you analyse, return the url from the input"
+						},
+						"image_description": {
+							"type": "string",
+							"description": "The description of the image, if there is nothing to describe, return 'No description', describe within 25 words",
+							"maxLength": 200
+						}
+					},
+					"required": [
+						"risk_score",
+						"reason",
+						"confidence",
+						"timestamp",
+						"image_url",
+						"image_description"
+					],
+					"additionalProperties": false
+				}
+			},
+			"required": [
+				"en",
+				"zh-CN"
+			],
+			"additionalProperties": false
+		}
+	},
+	"required": [
+		"output"
+	],
+	"additionalProperties": false
+}

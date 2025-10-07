@@ -1,4 +1,5 @@
 from typing import Any, Dict
+from botocore.config import Config as BotocoreConfig
 from strands import Agent
 from strands.models import BedrockModel
 from strands.types.agent import AgentInput
@@ -7,6 +8,17 @@ import boto3
 import requests
 from PIL import Image
 import io
+import logging
+
+# Configure the root strands logger
+l = logging.getLogger("strands")
+l.setLevel(logging.DEBUG)
+
+# Add a handler to see the logs
+logging.basicConfig(
+    format="%(levelname)s | %(name)s | %(message)s", 
+    handlers=[logging.StreamHandler()]
+)
 
 CAMERA_MOTION_ACTIVITIES_AGENT_SYSTEM_PROMPT = """
 You are an intelligent security camera image analysis agent specializing in threat assessment and activity monitoring.
@@ -35,63 +47,97 @@ Be objective, thorough, and focus on security-relevant details while maintaining
 
 """
 
-def handler(event: Dict[str, Any], _context) -> str:
-	image_path=event.get("image_path")
+def custom_callback_handler(**kwargs):
+    l.info(f"Agent event: {kwargs}")
+    # Process stream data
+    if "data" in kwargs:
+        l.info(f"Agent event: {kwargs['data']}")
+    elif "current_tool_use" in kwargs and kwargs["current_tool_use"].get("name"):
+        l.info(f"\nUSING TOOL: {kwargs['current_tool_use']['name']}")
 
-	# Load image from URL
+def handler(event: Dict[str, Any], _context) -> Dict[str, Any]:
+    image_path = event.get("image_path")
 
+    # Load image from URL
 
-	# Download image from URL
-	response = requests.get(image_path)
-	response.raise_for_status()
+    # Download image from URL
+    response = requests.get(image_path, timeout=15)
+    response.raise_for_status()
 
-	# Load image and get format
-	image = Image.open(io.BytesIO(response.content))
-	image_format = image.format.lower() if image.format else 'jpeg'
+    # Load image and get format
+    image = Image.open(io.BytesIO(response.content))
 
-	# Convert to bytes
-	image_bytes = response.content
+    image_format = image.format.lower() if image.format else 'jpeg'
 
+    # Convert to bytes
+    image_bytes = response.content
 
-	boto3_session = boto3.Session(
-		profile_name="leeliwei930",
-		region_name="ap-southeast-1",
-	)
+    boto3_session = boto3.Session(
+        region_name="ap-southeast-1",
+    )
 
-	bedrock_model = BedrockModel(
-		model_id="apac.anthropic.claude-3-5-sonnet-20241022-v2:0",
-		boto_session=boto3_session,
-	)
+    bedrock_model = BedrockModel(
+        model_id="arn:aws:bedrock:ap-southeast-1:096778346036:application-inference-profile/m2yc3f0mbts3",
+        boto_session=boto3_session,
+        boto_client_config=BotocoreConfig(
+            connect_timeout=10,
+            read_timeout=60,
+        ),
+        streaming=False,
+    )
 
-	agent = Agent(
-		model=bedrock_model,
-		system_prompt=CAMERA_MOTION_ACTIVITIES_AGENT_SYSTEM_PROMPT,
-	)
+    agent = Agent(
+        model=bedrock_model,
+        system_prompt=CAMERA_MOTION_ACTIVITIES_AGENT_SYSTEM_PROMPT,
+        callback_handler=custom_callback_handler,
+    )
 
-	agent_input : AgentInput = [
-		{
-			"text": f"Analyse following image",
-			"image": {
-				"format": image_format,
-				"source": {
-					"bytes": image_bytes
-				}
-			}
-		},
-		{
-			"text": f"The source url of the image is {image_path}"
-		}
-	]
+    agent_input: AgentInput = [
+        {
+            "text": "Analyse following image",
+            "image": {
+                "format": image_format,
+                "source": {
+                    "bytes": image_bytes
+                }
+            }
+        },
+        {
+            "text": f"The source url of the image is {image_path}"
+        }
+    ]
+    
+    result = None
+    try:
+        l.info(f"Analysing image: {image_path}")
+        agent(agent_input)
+        result = agent.structured_output(AnalyzeResponse, "Pass the analysed response information in the previous message into `AnalyzeResponse`")
+    except Exception as e:
+        l.error(f"Error analysing image: {e}")
+        return {
+            "response": {
+                "content": "Error analysing image",
+                "type": "text"
+            }
+        }
 
-	response = agent.structured_output(output_model=AnalyzeResponse, prompt=agent_input)
+    if result is None:
+        return {
+            "response": {
+                "content": "Error analysing image",
+                "type": "text"
+            }
+        }
+    
+    return {
+        "response": {
+            "content": result.model_dump_json(),
+            "type": "json"
+        }
+    }
 
-	return response.model_dump_json()
-
-
-
-
-
-
-
-
-
+if __name__ == "__main__":
+    result = handler({
+        "image_path": "https://storage.r2.homelab.iewileel.dev/camera_snapshot/20251005/233053_screenshot.jpg"
+    }, None)
+    print(result)

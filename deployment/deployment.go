@@ -1,13 +1,21 @@
 package main
 
 import (
+	"os"
+
 	"github.com/aws/aws-cdk-go/awscdk/v2"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awsec2"
+	"github.com/aws/aws-cdk-go/awscdk/v2/awsiam"
+	"github.com/aws/aws-cdk-go/awscdk/v2/awslambda"
 
 	// "github.com/aws/aws-cdk-go/awscdk/v2/awssqs"
 	"github.com/aws/constructs-go/constructs/v10"
 	"github.com/aws/jsii-runtime-go"
 )
+
+type VPCStackProps struct {
+	awscdk.StackProps
+}
 
 type DeploymentStackProps struct {
 	awscdk.StackProps
@@ -30,129 +38,42 @@ func NewDeploymentStack(scope constructs.Construct, id string, props *Deployment
 	return stack
 }
 
-func NewVPC(scope constructs.Construct, id string) awsec2.Vpc {
+func NewVPCStack(scope constructs.Construct, id string, props *VPCStackProps) (awscdk.Stack, awsec2.Vpc) {
 
-	vpc := awsec2.NewVpc(scope, jsii.String("agent_vpc"), &awsec2.VpcProps{
-		MaxAzs:        jsii.Number(3),
-		IpAddresses:   awsec2.IpAddresses_Cidr(jsii.String("172.31.0.0/16")),
-		Ipv6Addresses: awsec2.Ipv6Addresses_AmazonProvided(),
-		IpProtocol:    awsec2.IpProtocol_DUAL_STACK,
-	})
+	var sprops awscdk.StackProps
+	if props != nil {
+		sprops = props.StackProps
+	}
+	stack := awscdk.NewStack(scope, &id, &sprops)
 
-	// Private subnets
-	awsec2.NewCfnSubnet(scope, jsii.String("agent_vpc_private_subnet_5a"), &awsec2.CfnSubnetProps{
-		VpcId:                       vpc.VpcId(),
-		CidrBlock:                   jsii.String("172.31.1.0/24"),
-		AvailabilityZone:            jsii.String("ap-southeast-5a"),
-		MapPublicIpOnLaunch:         jsii.Bool(false),
-		AssignIpv6AddressOnCreation: jsii.Bool(true),
-	})
-	awsec2.NewCfnSubnet(scope, jsii.String("agent_vpc_private_subnet_5b"), &awsec2.CfnSubnetProps{
-		VpcId:                       vpc.VpcId(),
-		CidrBlock:                   jsii.String("172.31.3.0/24"),
-		AvailabilityZone:            jsii.String("ap-southeast-5b"),
-		MapPublicIpOnLaunch:         jsii.Bool(false),
-		AssignIpv6AddressOnCreation: jsii.Bool(true),
-	})
-	awsec2.NewCfnSubnet(scope, jsii.String("agent_vpc_private_subnet_5c"), &awsec2.CfnSubnetProps{
-		VpcId:                       vpc.VpcId(),
-		CidrBlock:                   jsii.String("172.31.5.0/24"),
-		AvailabilityZone:            jsii.String("ap-southeast-5c"),
-		MapPublicIpOnLaunch:         jsii.Bool(false),
-		AssignIpv6AddressOnCreation: jsii.Bool(true),
-	})
-
-	awsec2.NewCfnSubnet(scope, jsii.String("agent_vpc_public_subnet_5a"), &awsec2.CfnSubnetProps{
-		VpcId:                       vpc.VpcId(),
-		CidrBlock:                   jsii.String("172.31.2.0/24"),
-		AvailabilityZone:            jsii.String("ap-southeast-5a"),
-		AssignIpv6AddressOnCreation: jsii.Bool(true),
-	})
-	awsec2.NewCfnSubnet(scope, jsii.String("agent_vpc_public_subnet_5b"), &awsec2.CfnSubnetProps{
-		VpcId:                       vpc.VpcId(),
-		CidrBlock:                   jsii.String("172.31.4.0/24"),
-		AvailabilityZone:            jsii.String("ap-southeast-5b"),
-		AssignIpv6AddressOnCreation: jsii.Bool(true),
-	})
-	awsec2.NewCfnSubnet(scope, jsii.String("agent_vpc_public_subnet_5c"), &awsec2.CfnSubnetProps{
-		VpcId:                       vpc.VpcId(),
-		CidrBlock:                   jsii.String("172.31.6.0/24"),
-		AvailabilityZone:            jsii.String("ap-southeast-5c"),
-		AssignIpv6AddressOnCreation: jsii.Bool(true),
+	vpc := awsec2.NewVpc(stack, jsii.String("homelabVpc"), &awsec2.VpcProps{
+		EnableDnsHostnames:     jsii.Bool(true),
+		EnableDnsSupport:       jsii.Bool(true),
+		IpAddresses:            awsec2.IpAddresses_Cidr(jsii.String("172.31.0.0/16")),
+		Ipv6Addresses:          awsec2.Ipv6Addresses_AmazonProvided(),
+		NatGateways:            jsii.Number(0),
+		MaxAzs:                 jsii.Number(3),
+		DefaultInstanceTenancy: awsec2.DefaultInstanceTenancy_DEFAULT,
+		CreateInternetGateway:  jsii.Bool(true),
+		IpProtocol:             awsec2.IpProtocol_DUAL_STACK,
+		SubnetConfiguration: &[]*awsec2.SubnetConfiguration{
+			{
+				Name:                        jsii.String("homelabVpcPrivateSubnet"),
+				SubnetType:                  awsec2.SubnetType_PRIVATE_WITH_EGRESS,
+				Ipv6AssignAddressOnCreation: jsii.Bool(true),
+				CidrMask:                    jsii.Number(22),
+			},
+			{
+				Name:                        jsii.String("homelabVpcPublicSubnet"),
+				SubnetType:                  awsec2.SubnetType_PUBLIC,
+				Ipv6AssignAddressOnCreation: jsii.Bool(true),
+				CidrMask:                    jsii.Number(22),
+				MapPublicIpOnLaunch:         jsii.Bool(false),
+			},
+		},
 	})
 
-	awsec2.NewCfnRouteTable(scope, jsii.String("agent_vpc_private_rtb"), &awsec2.CfnRouteTableProps{
-		VpcId: vpc.VpcId(),
-	})
-	awsec2.NewCfnSubnetRouteTableAssociation(scope, jsii.String("agent_vpc_private_subnet_5a_route_table_association"), &awsec2.CfnSubnetRouteTableAssociationProps{
-		SubnetId:     jsii.String("agent_vpc_private_subnet_5a"),
-		RouteTableId: jsii.String("agent_vpc_private_rtb"),
-	})
-	awsec2.NewCfnSubnetRouteTableAssociation(scope, jsii.String("agent_vpc_private_subnet_5b_route_table_association"), &awsec2.CfnSubnetRouteTableAssociationProps{
-		SubnetId:     jsii.String("agent_vpc_private_subnet_5b"),
-		RouteTableId: jsii.String("agent_vpc_private_rtb"),
-	})
-	awsec2.NewCfnSubnetRouteTableAssociation(scope, jsii.String("agent_vpc_private_subnet_5c_route_table_association"), &awsec2.CfnSubnetRouteTableAssociationProps{
-		SubnetId:     jsii.String("agent_vpc_private_subnet_5c"),
-		RouteTableId: jsii.String("agent_vpc_private_rtb"),
-	})
-
-	awsec2.NewCfnRouteTable(scope, jsii.String("agent_vpc_public_rtb"), &awsec2.CfnRouteTableProps{
-		VpcId: vpc.VpcId(),
-	})
-	awsec2.NewCfnSubnetRouteTableAssociation(scope, jsii.String("agent_vpc_public_subnet_5a_route_table_association"), &awsec2.CfnSubnetRouteTableAssociationProps{
-		SubnetId:     jsii.String("agent_vpc_public_subnet_5a"),
-		RouteTableId: jsii.String("agent_vpc_public_rtb"),
-	})
-	awsec2.NewCfnSubnetRouteTableAssociation(scope, jsii.String("agent_vpc_public_subnet_5b_route_table_association"), &awsec2.CfnSubnetRouteTableAssociationProps{
-		SubnetId:     jsii.String("agent_vpc_public_subnet_5b"),
-		RouteTableId: jsii.String("agent_vpc_public_rtb"),
-	})
-	awsec2.NewCfnSubnetRouteTableAssociation(scope, jsii.String("agent_vpc_public_subnet_5c_route_table_association"), &awsec2.CfnSubnetRouteTableAssociationProps{
-		SubnetId:     jsii.String("agent_vpc_public_subnet_5c"),
-		RouteTableId: jsii.String("agent_vpc_public_rtb"),
-	})
-
-	awsec2.NewCfnInternetGateway(scope, jsii.String("agent_vpc_igw"), &awsec2.CfnInternetGatewayProps{})
-
-	// Create an Egress-Only Internet Gateway and attach it to the VPC
-	awsec2.NewCfnEgressOnlyInternetGateway(scope, jsii.String("agent_vpc_egress_only_igw"), &awsec2.CfnEgressOnlyInternetGatewayProps{
-		VpcId: vpc.VpcId(),
-	})
-
-	awsec2.NewCfnVPCGatewayAttachment(scope, jsii.String("agent_vpc_igw_attachment"), &awsec2.CfnVPCGatewayAttachmentProps{
-		VpcId:             vpc.VpcId(),
-		InternetGatewayId: jsii.String("agent_vpc_igw"),
-	})
-	awsec2.NewCfnVPCGatewayAttachment(scope, jsii.String("agent_vpc_egress_only_igw_attachment"), &awsec2.CfnVPCGatewayAttachmentProps{
-		VpcId:             vpc.VpcId(),
-		InternetGatewayId: jsii.String("agent_vpc_egress_only_igw"),
-	})
-
-	awsec2.NewCfnGatewayRouteTableAssociation(scope, jsii.String("agent_vpc_igw_attachment_route_table_association"), &awsec2.CfnGatewayRouteTableAssociationProps{
-		GatewayId:    jsii.String("agent_vpc_igw"),
-		RouteTableId: jsii.String("agent_vpc_public_rtb"),
-	})
-	awsec2.NewCfnGatewayRouteTableAssociation(scope, jsii.String("agent_vpc_egress_only_igw_attachment_route_table_association"), &awsec2.CfnGatewayRouteTableAssociationProps{
-		GatewayId:    jsii.String("agent_vpc_egress_only_igw"),
-		RouteTableId: jsii.String("agent_vpc_private_rtb"),
-	})
-
-	// Explicitly add a route for internet-bound traffic in the public route table:
-	awsec2.NewCfnRoute(scope, jsii.String("agent_vpc_public_rtb_default_route"), &awsec2.CfnRouteProps{
-		RouteTableId:         jsii.String("agent_vpc_public_rtb"),
-		DestinationCidrBlock: jsii.String("0.0.0.0/0"),
-		GatewayId:            jsii.String("agent_vpc_igw"),
-	})
-
-	// For IPv6, if needed, add a route for ::/0 to the IGW as well.
-	awsec2.NewCfnRoute(scope, jsii.String("agent_vpc_public_rtb_default_route_ipv6"), &awsec2.CfnRouteProps{
-		RouteTableId:             jsii.String("agent_vpc_public_rtb"),
-		DestinationIpv6CidrBlock: jsii.String("::/0"),
-		GatewayId:                jsii.String("agent_vpc_igw"),
-	})
-
-	return vpc
+	return stack, vpc
 }
 
 func main() {
@@ -160,31 +81,54 @@ func main() {
 
 	app := awscdk.NewApp(nil)
 
-	// stack := NewDeploymentStack(app, "cam_footage_activities_analyser_agent", &DeploymentStackProps{
-	// 	awscdk.StackProps{
-	// 		Env: env(),
-	// 	},
-	// })
+	vpcStack, _ := NewVPCStack(app, "HomeLabVPC", &VPCStackProps{
+		awscdk.StackProps{
+			Env: env(),
+		},
+	})
+	stack := NewDeploymentStack(app, "CamFootageActivitiesAnalyserAgentDeploymentStack", &DeploymentStackProps{
+		awscdk.StackProps{
+			Env: env(),
+		},
+	})
 
-	NewVPC(app, "cam_footage_activities_analyser_agent_vpc")
+	dependenciesLayer := awslambda.NewLayerVersion(stack, jsii.String(
+		"camFootageActivitiesAnalyserAgentDependenciesLayer",
+	), &awslambda.LayerVersionProps{
+		Code:               awslambda.AssetCode_FromAsset(jsii.String("../build/dependencies.zip"), nil),
+		CompatibleRuntimes: &[]awslambda.Runtime{awslambda.Runtime_PYTHON_3_13()},
+	})
 
-	// dependenciesLayer := awslambda.NewLayerVersion(stack, jsii.String(
-	// 	"camFootageActivitiesAnalyserAgentDependenciesLayer",
-	// ), &awslambda.LayerVersionProps{
-	// 	Code: awslambda.NewAssetCode(jsii.String("../dependencies.zip"),
-	// 		nil,
-	// 	),
-	// })
+	camFootageActivitiesAnalyserAgentFunc := awslambda.NewFunction(stack, jsii.String("camFootageActivitiesAnalyserAgent"), &awslambda.FunctionProps{
+		Code: awslambda.AssetCode_FromAsset(jsii.String("../build/functions.zip"),
+			nil,
+		),
+		MemorySize: jsii.Number(2048),
+		Timeout:    awscdk.Duration_Seconds(jsii.Number(60)),
+		Handler:    jsii.String("agent.handler"),
+		Runtime:    awslambda.Runtime_PYTHON_3_13(),
+		Layers:     &[]awslambda.ILayerVersion{dependenciesLayer},
+		Vpc: awsec2.Vpc_FromLookup(vpcStack, jsii.String("lambdaVpc"), &awsec2.VpcLookupOptions{
+			VpcName: jsii.String("HomeLabVPC/homelabVpc"),
+		}),
+		Architecture:            awslambda.Architecture_ARM_64(),
+		AllowAllIpv6Outbound:    jsii.Bool(true),
+		Ipv6AllowedForDualStack: jsii.Bool(true),
+		AllowPublicSubnet:       jsii.Bool(true),
+		VpcSubnets: &awsec2.SubnetSelection{
+			SubnetType: awsec2.SubnetType_PRIVATE_WITH_EGRESS,
+		},
+	})
 
-	// awslambda.NewFunction(stack, jsii.String("camFootageActivitiesAnalyserAgent"), &awslambda.FunctionProps{
-	// 	Code: awslambda.NewAssetCode(jsii.String("../functions.zip"),
-	// 		nil,
-	// 	),
-	// 	Handler: jsii.String("agent.handler"),
-	// 	Runtime: awslambda.Runtime_PYTHON_3_13(),
-	// 	Layers:  &[]awslambda.ILayerVersion{dependenciesLayer},
-	// 	Vpc:     vpc,
-	// })
+	camFootageActivitiesAnalyserAgentFunc.AddToRolePolicy(awsiam.NewPolicyStatement(&awsiam.PolicyStatementProps{
+		Actions: &[]*string{
+			jsii.String("bedrock:InvokeModel"),
+			jsii.String("bedrock:InvokeModelWithResponseStream"),
+			jsii.String("bedrock:ListInferenceProfiles"),
+			jsii.String("bedrock:GetInferenceProfile"),
+		},
+		Resources: &[]*string{jsii.String("*")},
+	}))
 
 	app.Synth(nil)
 }
@@ -196,7 +140,7 @@ func env() *awscdk.Environment {
 	// Account/Region-dependent features and context lookups will not work, but a
 	// single synthesized template can be deployed anywhere.
 	//---------------------------------------------------------------------------
-	return nil
+	// return nil
 
 	// Uncomment if you know exactly what account and region you want to deploy
 	// the stack to. This is the recommendation for production stacks.
@@ -210,8 +154,8 @@ func env() *awscdk.Environment {
 	// implied by the current CLI configuration. This is recommended for dev
 	// stacks.
 	//---------------------------------------------------------------------------
-	// return &awscdk.Environment{
-	//  Account: jsii.String(os.Getenv("CDK_DEFAULT_ACCOUNT")),
-	//  Region:  jsii.String(os.Getenv("CDK_DEFAULT_REGION")),
-	// }
+	return &awscdk.Environment{
+		Account: jsii.String(os.Getenv("CDK_DEFAULT_ACCOUNT")),
+		Region:  jsii.String(os.Getenv("CDK_DEFAULT_REGION")),
+	}
 }
