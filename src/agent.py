@@ -1,3 +1,4 @@
+import json
 from typing import Any, Dict
 from botocore.config import Config as BotocoreConfig
 from strands import Agent
@@ -9,10 +10,18 @@ import requests
 from PIL import Image
 import io
 import logging
+import os
+
+
+APPLICATION_INFERENCE_PROFILE_ARN = os.environ.get("APPLICATION_INFERENCE_PROFILE_ARN", "arn:aws:bedrock:ap-southeast-1:096778346036:application-inference-profile/m2yc3f0mbts3")
+APP_DEBUG = os.environ.get("APP_DEBUG", "DEBUG")
 
 # Configure the root strands logger
 l = logging.getLogger("strands")
-l.setLevel(logging.DEBUG)
+# Get log level from environment variable, default to DEBUG if not set
+log_level_name = APP_DEBUG
+log_level = getattr(logging, log_level_name, logging.DEBUG)
+l.setLevel(log_level)
 
 # Add a handler to see the logs
 logging.basicConfig(
@@ -47,6 +56,7 @@ Be objective, thorough, and focus on security-relevant details while maintaining
 
 """
 
+
 def custom_callback_handler(**kwargs):
     l.info(f"Agent event: {kwargs}")
     # Process stream data
@@ -56,6 +66,7 @@ def custom_callback_handler(**kwargs):
         l.info(f"\nUSING TOOL: {kwargs['current_tool_use']['name']}")
 
 def handler(event: Dict[str, Any], _context) -> Dict[str, Any]:
+    l.info(f"Using application inference profile ARN: {APPLICATION_INFERENCE_PROFILE_ARN}")
     image_path = event.get("image_path")
 
     # Load image from URL
@@ -77,13 +88,12 @@ def handler(event: Dict[str, Any], _context) -> Dict[str, Any]:
     )
 
     bedrock_model = BedrockModel(
-        model_id="arn:aws:bedrock:ap-southeast-1:096778346036:application-inference-profile/m2yc3f0mbts3",
+        model_id=APPLICATION_INFERENCE_PROFILE_ARN,
         boto_session=boto3_session,
         boto_client_config=BotocoreConfig(
             connect_timeout=10,
             read_timeout=60,
         ),
-        streaming=False,
     )
 
     agent = Agent(
@@ -107,37 +117,30 @@ def handler(event: Dict[str, Any], _context) -> Dict[str, Any]:
         }
     ]
     
-    result = None
+    
     try:
         l.info(f"Analysing image: {image_path}")
-        agent(agent_input)
-        result = agent.structured_output(AnalyzeResponse, "Pass the analysed response information in the previous message into `AnalyzeResponse`")
+        result = agent.structured_output(output_model=AnalyzeResponse, prompt=agent_input)
+        return {
+            "data": {
+                "result": result.model_dump(),
+            }
+        }
     except Exception as e:
         l.error(f"Error analysing image: {e}")
         return {
-            "response": {
-                "content": "Error analysing image",
-                "type": "text"
-            }
-        }
-
-    if result is None:
-        return {
-            "response": {
-                "content": "Error analysing image",
-                "type": "text"
-            }
+            "errors": [
+                {
+                    "message": "Error analysing image",
+                    "details": str(e)
+                }
+            ] 
         }
     
-    return {
-        "response": {
-            "content": result.model_dump_json(),
-            "type": "json"
-        }
-    }
+
 
 if __name__ == "__main__":
     result = handler({
-        "image_path": "https://storage.r2.homelab.iewileel.dev/camera_snapshot/20251005/233053_screenshot.jpg"
+        "image_path": "https://storage.r2.homelab.iewileel.dev/camera_snapshot/20251008/180629_screenshot.jpg"
     }, None)
-    print(result)
+    print(json.dumps(result, indent=4))
