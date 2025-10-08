@@ -6,7 +6,6 @@ from strands.models import BedrockModel
 from strands.types.agent import AgentInput
 from models.analyze_response import AnalyzeResponse
 import boto3
-import requests
 from PIL import Image
 import io
 import logging
@@ -15,6 +14,10 @@ import os
 
 APPLICATION_INFERENCE_PROFILE_ARN = os.environ.get("APPLICATION_INFERENCE_PROFILE_ARN", "arn:aws:bedrock:ap-southeast-1:096778346036:application-inference-profile/m2yc3f0mbts3")
 APP_DEBUG = os.environ.get("APP_DEBUG", "DEBUG")
+R2_ACCESS_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID")
+R2_SECRET_ACCESS_KEY = os.environ.get("R2_SECRET_ACCESS_KEY")
+R2_ENDPOINT_URL = os.environ.get("R2_ENDPOINT_URL")
+R2_BUCKET_NAME = os.environ.get("R2_BUCKET_NAME")
 
 # Configure the root strands logger
 l = logging.getLogger("strands")
@@ -67,21 +70,31 @@ def custom_callback_handler(**kwargs):
 
 def handler(event: Dict[str, Any], _context) -> Dict[str, Any]:
     l.info(f"Using application inference profile ARN: {APPLICATION_INFERENCE_PROFILE_ARN}")
-    image_path = event.get("image_path")
+    file_key = event.get("file_key")
 
-    # Load image from URL
+    # Create S3 client for R2
+    s3_client = boto3.client(
+        's3',
+        endpoint_url=R2_ENDPOINT_URL,
+        aws_access_key_id=R2_ACCESS_KEY_ID,
+        aws_secret_access_key=R2_SECRET_ACCESS_KEY,
+        region_name="auto",
+    )
 
-    # Download image from URL
-    response = requests.get(image_path, timeout=15)
-    response.raise_for_status()
+    # Download image from R2
+    response = s3_client.get_object(Bucket=R2_BUCKET_NAME, Key=file_key)
+    image_bytes = response['Body'].read()
 
     # Load image and get format
-    image = Image.open(io.BytesIO(response.content))
-
+    image = Image.open(io.BytesIO(image_bytes))
     image_format = image.format.lower() if image.format else 'jpeg'
 
-    # Convert to bytes
-    image_bytes = response.content
+    # Generate presigned URL with 300 seconds expiration
+    presigned_url = s3_client.generate_presigned_url(
+        'get_object',
+        Params={'Bucket': R2_BUCKET_NAME, 'Key': file_key},
+        ExpiresIn=300
+    )
 
     boto3_session = boto3.Session(
         region_name="ap-southeast-1",
@@ -113,13 +126,13 @@ def handler(event: Dict[str, Any], _context) -> Dict[str, Any]:
             }
         },
         {
-            "text": f"The source url of the image is {image_path}"
+            "text": f"The source url of the image is {presigned_url}"
         }
     ]
     
     
     try:
-        l.info(f"Analysing image: {image_path}")
+        l.info(f"Analysing image from file key: {file_key}")
         result = agent.structured_output(output_model=AnalyzeResponse, prompt=agent_input)
         return {
             "data": {
@@ -141,6 +154,6 @@ def handler(event: Dict[str, Any], _context) -> Dict[str, Any]:
 
 if __name__ == "__main__":
     result = handler({
-        "image_path": "https://storage.r2.homelab.iewileel.dev/camera_snapshot/20251008/180629_screenshot.jpg"
+        "file_key": "camera_snapshot/20251008/180629_screenshot.jpg"
     }, None)
     print(json.dumps(result, indent=4))

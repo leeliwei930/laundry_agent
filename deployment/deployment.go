@@ -57,6 +57,10 @@ func main() {
 		Environment: &map[string]*string{
 			"APPLICATION_INFERENCE_PROFILE_ARN": jsii.String("arn:aws:bedrock:ap-southeast-1:096778346036:application-inference-profile/m2yc3f0mbts3"),
 			"APP_DEBUG":                         jsii.String("WARNING"),
+			"R2_ACCESS_KEY_ID":                  jsii.String(os.Getenv("R2_ACCESS_KEY_ID")),
+			"R2_SECRET_ACCESS_KEY":              jsii.String(os.Getenv("R2_SECRET_ACCESS_KEY")),
+			"R2_ENDPOINT_URL":                   jsii.String(os.Getenv("R2_ENDPOINT_URL")),
+			"R2_BUCKET_NAME":                    jsii.String(os.Getenv("R2_BUCKET_NAME")),
 		},
 	})
 
