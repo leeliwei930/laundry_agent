@@ -392,48 +392,9 @@ def download_image_from_r2(object_key: str) -> tuple[bytes, str]:
 
 ---
 
-## Phase 9: Monitoring and Observability
+## Phase 9: Documentation Updates
 
-### 9.1 CloudWatch Metrics
-
-Add custom metrics for R2 operations:
-
-```python
-import boto3
-
-cloudwatch = boto3.client('cloudwatch')
-
-def put_metric(metric_name: str, value: float):
-    cloudwatch.put_metric_data(
-        Namespace='CameraFootageAnalysis',
-        MetricData=[{
-            'MetricName': metric_name,
-            'Value': value,
-            'Unit': 'Count'
-        }]
-    )
-
-# In download_image_from_r2:
-start_time = time.time()
-# ... download logic ...
-duration = time.time() - start_time
-put_metric('R2DownloadDuration', duration)
-put_metric('R2DownloadSuccess', 1)
-```
-
-### 9.2 Logging Enhancements
-
-```python
-l.info(f"R2 Config - Endpoint: {R2_ENDPOINT}, Bucket: {R2_BUCKET_NAME}")
-l.info(f"Downloading from R2: bucket={R2_BUCKET_NAME}, key={object_key}")
-l.info(f"Download complete: {len(image_bytes)} bytes, format={image_format}")
-```
-
----
-
-## Phase 10: Documentation Updates
-
-### 10.1 Update README
+### 9.1 Update README
 
 Add section about R2 configuration:
 
@@ -452,7 +413,7 @@ Add section about R2 configuration:
 - `R2_PUBLIC_URL`: Public URL base for constructing source URLs
 ```
 
-### 10.2 API Documentation
+### 9.2 API Documentation
 
 Document the new event schema:
 
@@ -524,10 +485,9 @@ If issues occur after deployment:
 - **Phase 6 (Migration)**: Varies based on strategy
 - **Phase 7 (Security Enhancements)**: 1-2 hours (optional)
 - **Phase 8 (Error Handling)**: 1 hour
-- **Phase 9 (Monitoring)**: 1 hour (optional)
-- **Phase 10 (Documentation)**: 1 hour
+- **Phase 9 (Documentation)**: 1 hour
 
-**Total**: 8-12 hours for complete implementation and testing
+**Total**: 7-11 hours for complete implementation and testing
 
 ---
 
