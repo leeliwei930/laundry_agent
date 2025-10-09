@@ -10,6 +10,7 @@ import (
 	// "github.com/aws/aws-cdk-go/awscdk/v2/awssqs"
 	"github.com/aws/constructs-go/constructs/v10"
 	"github.com/aws/jsii-runtime-go"
+	_ "github.com/joho/godotenv/autoload"
 )
 
 type DeploymentStackProps struct {
