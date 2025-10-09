@@ -4,12 +4,14 @@ from botocore.config import Config as BotocoreConfig
 from strands import Agent
 from strands.models import BedrockModel
 from strands.types.agent import AgentInput
-from models.analyze_response import AnalyzeResponse
+from models.analyze_response import LocalisedAnalyseResponse
 import boto3
+from boto3_type_annotations import s3
 from PIL import Image
 import io
 import logging
 import os
+
 
 
 APPLICATION_INFERENCE_PROFILE_ARN = os.environ.get("APPLICATION_INFERENCE_PROFILE_ARN", "arn:aws:bedrock:ap-southeast-1:096778346036:application-inference-profile/m2yc3f0mbts3")
@@ -45,7 +47,7 @@ Your primary task is to analyze security camera images and provide comprehensive
 
 2. **Image Analysis**: Provide a concise description of what you observe in the image, including:
    - People and their activities
-   - Vehicles (type, color, license plates if visible)
+   - Vehicles (type, color, license plates if visible )
    - Any anomalies or points of interest
 
 3. **Assessment Details**: For each analysis, provide:
@@ -73,7 +75,7 @@ def handler(event: Dict[str, Any], _context) -> Dict[str, Any]:
     file_key = event.get("file_key")
 
     # Create S3 client for R2
-    s3_client = boto3.client(
+    s3_client : s3.Client = boto3.client(
         's3',
         endpoint_url=R2_ENDPOINT_URL,
         aws_access_key_id=R2_ACCESS_KEY_ID,
@@ -133,7 +135,7 @@ def handler(event: Dict[str, Any], _context) -> Dict[str, Any]:
     
     try:
         l.info(f"Analysing image from file key: {file_key}")
-        result = agent.structured_output(output_model=AnalyzeResponse, prompt=agent_input)
+        result = agent.structured_output(output_model=LocalisedAnalyseResponse, prompt=agent_input)
         return {
             "data": {
                 "result": result.model_dump(),
