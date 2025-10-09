@@ -6,7 +6,6 @@ from strands.models import BedrockModel
 from strands.types.agent import AgentInput
 from models.analyze_response import LocalisedAnalyseResponse
 import boto3
-from boto3_type_annotations import s3
 from PIL import Image
 import io
 import logging
@@ -75,7 +74,7 @@ def handler(event: Dict[str, Any], _context) -> Dict[str, Any]:
     file_key = event.get("file_key")
 
     # Create S3 client for R2
-    s3_client : s3.Client = boto3.client(
+    s3_client = boto3.client(
         's3',
         endpoint_url=R2_ENDPOINT_URL,
         aws_access_key_id=R2_ACCESS_KEY_ID,

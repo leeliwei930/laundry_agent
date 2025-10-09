@@ -4,4 +4,4 @@ boto3==1.40.48
 botocore==1.40.48
 Pillow==11.3.0
 pydantic==2.12.0
-boto3-type-annotations-with-docs==0.3.1
+
