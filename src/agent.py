@@ -104,6 +104,7 @@ def handler(event: Dict[str, Any], _context) -> Dict[str, Any]:
     bedrock_model = BedrockModel(
         model_id=APPLICATION_INFERENCE_PROFILE_ARN,
         boto_session=boto3_session,
+        cache_prompt="default",
         boto_client_config=BotocoreConfig(
             connect_timeout=10,
             read_timeout=60,
