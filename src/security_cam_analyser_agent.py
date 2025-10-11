@@ -5,6 +5,7 @@ from strands import Agent
 from strands.models import BedrockModel
 from strands.types.agent import AgentInput
 from models.analyze_response import LocalisedAnalyseResponse
+from boto3_type_annotations import s3
 import boto3
 from PIL import Image
 import io
@@ -74,7 +75,7 @@ def handler(event: Dict[str, Any], _context) -> Dict[str, Any]:
     file_key = event.get("file_key")
 
     # Create S3 client for R2
-    s3_client = boto3.client(
+    s3_client : s3.Client = boto3.client(
         's3',
         endpoint_url=R2_ENDPOINT_URL,
         aws_access_key_id=R2_ACCESS_KEY_ID,
@@ -94,7 +95,8 @@ def handler(event: Dict[str, Any], _context) -> Dict[str, Any]:
     presigned_url = s3_client.generate_presigned_url(
         'get_object',
         Params={'Bucket': R2_BUCKET_NAME, 'Key': file_key},
-        ExpiresIn=300
+        # 7 days
+        ExpiresIn=604800
     )
 
     boto3_session = boto3.Session(
