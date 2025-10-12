@@ -59,7 +59,9 @@ The agent will process images from security cameras, analyze current and upcomin
 6. WHEN returning results THEN the agent SHALL include confidence score (float 0.0-1.0)
 7. WHEN returning results THEN the agent SHALL include timestamp of analysis (ISO 8601 format)
 8. WHEN returning results THEN the agent SHALL include the source image URL
-9. IF an error occurs during processing THEN the agent SHALL return a structured error response with error details
+9. WHEN returning results THEN the agent SHALL include a notification title (string)
+10. WHEN returning results THEN the agent SHALL include a notification message (string)
+11. IF an error occurs during processing THEN the agent SHALL return a structured error response with error details
 
 ### Requirement 5: Multi-Language Support
 
@@ -69,9 +71,11 @@ The agent will process images from security cameras, analyze current and upcomin
 
 1. WHEN the agent returns results THEN it SHALL provide analysis in English (en)
 2. WHEN the agent returns results THEN it SHALL provide analysis in Simplified Chinese (zh_CN)
-3. WHEN providing localized content THEN the agent SHALL translate all text fields including descriptions and recommendations
+3. WHEN providing localized content THEN the agent SHALL translate all text fields including descriptions, recommendations, notification titles, and notification messages
 4. WHEN providing localized content THEN the agent SHALL maintain consistent meaning across all language versions
 5. IF translation is not possible for certain technical terms THEN the agent SHALL use the original term with explanation
+6. WHEN generating notification titles THEN the agent SHALL create concise, actionable titles appropriate for push notifications (max 60 characters)
+7. WHEN generating notification messages THEN the agent SHALL create clear, informative messages suitable for mobile notifications (max 200 characters)
 
 ### Requirement 6: Lambda Function Integration
 

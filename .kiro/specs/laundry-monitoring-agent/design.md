@@ -231,6 +231,18 @@ class LaundryAnalysisResponse(BaseModel):
                     "Reference specific weather factors and risk assessment."
     )
     
+    notification_title: str = Field(
+        description="Concise, actionable notification title for push notifications (Requirement 4.9). "
+                    "Max 60 characters. Should clearly indicate the action needed or status. "
+                    "Examples: 'Bring Laundry Inside!', 'Rain Coming Soon', 'Laundry Safe Outside' (Requirement 5.6)"
+    )
+    
+    notification_message: str = Field(
+        description="Clear, informative notification message for mobile notifications (Requirement 4.10). "
+                    "Max 200 characters. Should provide key details about weather risk and recommendation. "
+                    "Examples: 'Rain forecasted in 1 hour. Laundry detected on left side of porch.' (Requirement 5.7)"
+    )
+    
     confidence: float = Field(
         description="Confidence score for the analysis (0.0-1.0) (Requirements 3.6, 4.6). "
                     "Lower confidence for poor image quality or obstructed views.",
@@ -251,12 +263,14 @@ class LocalizedLaundryAnalysisResponse(BaseModel):
     """Multi-language response wrapper - addresses Requirement 5"""
     
     en: LaundryAnalysisResponse = Field(
-        description="English localization of the analysis (Requirement 5.1)"
+        description="English localization of the analysis (Requirement 5.1). "
+                    "Includes notification_title and notification_message fields (Requirements 5.6, 5.7)"
     )
     
     zh_CN: LaundryAnalysisResponse = Field(
         description="Simplified Chinese localization of the analysis (Requirement 5.2). "
-                    "All text fields translated while maintaining consistent meaning (Requirement 5.4)"
+                    "All text fields including notification_title and notification_message "
+                    "translated while maintaining consistent meaning (Requirements 5.3, 5.4)"
     )
 ```
 
@@ -309,8 +323,11 @@ The agent will use a specialized system prompt that instructs the model to:
 6. **Language requirements**: 
    - Provide complete analysis in English (en) (Requirement 5.1)
    - Provide complete analysis in Simplified Chinese (zh_CN) (Requirement 5.2)
+   - Translate all text fields including notification_title and notification_message (Requirement 5.3)
    - Maintain consistent meaning across languages (Requirement 5.4)
    - Use original terms with explanation for untranslatable technical terms (Requirement 5.5)
+   - Create concise notification titles (max 60 characters) (Requirement 5.6)
+   - Create clear notification messages (max 200 characters) (Requirement 5.7)
 
 **Design Rationale**: The system prompt is structured to directly address each requirement, ensuring the AI model receives clear instructions for all analysis aspects. The prompt emphasizes location-specific descriptions and multi-factor weather assessment to provide actionable insights.
 
