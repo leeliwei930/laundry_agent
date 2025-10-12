@@ -362,16 +362,274 @@ Return a JSON object with this exact structure:
 Remember: Your primary goal is to help homeowners protect their laundry from getting wet or damaged. When in doubt about weather risks, err on the side of caution and recommend bringing laundry inside."""
 
 
-def validate_weather_condition(condition: Dict[str, Any], condition_name: str) -> Optional[Dict[str, str]]:
+def validate_forecast_item(forecast_item: Dict[str, Any], item_name: str) -> Optional[Dict[str, str]]:
     """
-    Validate a weather condition object (current_hour or next_hour).
+    Validate a single forecast item from the weather forecast array.
+    
+    This function validates that a forecast item from the Home Assistant weather_forecast
+    contains all required fields (condition, datetime, temperature, humidity, wind_speed)
+    and that each field has the correct data type and format.
     
     Args:
-        condition: Weather condition dictionary to validate
-        condition_name: Name of the condition for error messages (e.g., "current_hour")
+        forecast_item: Forecast item dictionary to validate from weather_forecast
+        item_name: Name of the item for error messages (e.g., "forecast[0]")
     
     Returns:
-        Error dict if validation fails, None if valid
+        Error dict with message, details, and error_code if validation fails, None if valid
+    
+    Example:
+        >>> forecast_item = {
+        ...     "condition": "cloudy",
+        ...     "datetime": "2025-10-12T02:00:00+00:00",
+        ...     "temperature": 27.4,
+        ...     "humidity": 79,
+        ...     "wind_speed": 11.2
+        ... }
+        >>> validate_forecast_item(forecast_item, "forecast[0]")
+        None  # Returns None if validation passes
+    """
+    if not isinstance(forecast_item, dict):
+        return {
+            "message": f"Invalid forecast item: {item_name} must be an object",
+            "details": f"{item_name} is not a dictionary",
+            "error_code": "INPUT_VALIDATION_ERROR"
+        }
+    
+    # Validate required fields
+    required_fields = ["condition", "datetime", "temperature", "humidity", "wind_speed"]
+    missing_fields = [field for field in required_fields if field not in forecast_item]
+    
+    if missing_fields:
+        return {
+            "message": f"Invalid forecast item: {item_name} missing required fields",
+            "details": f"Missing fields in {item_name}: {', '.join(missing_fields)}",
+            "error_code": "INPUT_VALIDATION_ERROR"
+        }
+    
+    # Validate field types
+    if not isinstance(forecast_item.get("condition"), str):
+        return {
+            "message": f"Invalid forecast item: {item_name}.condition must be a string",
+            "details": f"{item_name}.condition is not a string",
+            "error_code": "INPUT_VALIDATION_ERROR"
+        }
+    
+    if not isinstance(forecast_item.get("temperature"), (int, float)):
+        return {
+            "message": f"Invalid forecast item: {item_name}.temperature must be a number",
+            "details": f"{item_name}.temperature is not a numeric value",
+            "error_code": "INPUT_VALIDATION_ERROR"
+        }
+    
+    if not isinstance(forecast_item.get("humidity"), (int, float)):
+        return {
+            "message": f"Invalid forecast item: {item_name}.humidity must be a number",
+            "details": f"{item_name}.humidity is not a numeric value",
+            "error_code": "INPUT_VALIDATION_ERROR"
+        }
+    
+    if not isinstance(forecast_item.get("wind_speed"), (int, float)):
+        return {
+            "message": f"Invalid forecast item: {item_name}.wind_speed must be a number",
+            "details": f"{item_name}.wind_speed is not a numeric value",
+            "error_code": "INPUT_VALIDATION_ERROR"
+        }
+    
+    # Validate datetime format
+    try:
+        datetime.fromisoformat(forecast_item["datetime"].replace('Z', '+00:00'))
+    except (ValueError, AttributeError, TypeError):
+        return {
+            "message": f"Invalid forecast item: {item_name}.datetime must be a valid ISO 8601 timestamp",
+            "details": f"{item_name}.datetime is not in valid ISO 8601 format",
+            "error_code": "INPUT_VALIDATION_ERROR"
+        }
+    
+    return None
+
+
+def extract_weather_data(weather_forecast: Dict[str, Any], current_time: str) -> Dict[str, Any]:
+    """
+    Extract and transform weather forecast data from Home Assistant format
+    to internal processing format, using current_time to identify relevant forecast entries.
+    
+    This function transforms the Home Assistant weather forecast structure (with entity IDs
+    and forecast arrays) into the internal format expected by downstream processing functions.
+    It intelligently matches forecast entries to the current and next hour based on the
+    provided current_time parameter.
+    
+    The function:
+    - Sorts forecast entries chronologically by datetime
+    - Finds the forecast entry closest to current_time for current_hour
+    - Selects the next chronological entry for next_hour
+    - Converts precipitation from 0-1 range to percentage (multiply by 100)
+    - Handles edge cases: missing next_hour, empty forecast array, invalid datetimes
+    
+    Example:
+        >>> weather_forecast = {
+        ...     "weather.forecast_home": {
+        ...         "forecast": [
+        ...             {
+        ...                 "condition": "cloudy",
+        ...                 "datetime": "2025-10-12T02:00:00+00:00",
+        ...                 "temperature": 27.4,
+        ...                 "wind_speed": 11.2,
+        ...                 "precipitation": 0,
+        ...                 "humidity": 79
+        ...             },
+        ...             {
+        ...                 "condition": "rainy",
+        ...                 "datetime": "2025-10-12T03:00:00+00:00",
+        ...                 "temperature": 28.7,
+        ...                 "wind_speed": 9.7,
+        ...                 "precipitation": 0.65,
+        ...                 "humidity": 75
+        ...             }
+        ...         ]
+        ...     }
+        ... }
+        >>> current_time = "2025-10-12T02:00:00+00:00"
+        >>> result = extract_weather_data(weather_forecast, current_time)
+        >>> result["current_hour"]["condition"]
+        'cloudy'
+        >>> result["next_hour"]["precipitation_probability"]
+        65.0  # Converted from 0.65 to percentage
+    
+    Args:
+        weather_forecast: Weather forecast dict with entity structure (e.g., {"weather.forecast_home": {...}})
+        current_time: ISO 8601 timestamp representing current time
+    
+    Returns:
+        Dict with current_hour and next_hour weather data in internal format:
+        {
+            "current_hour": {
+                "temperature": float,
+                "condition": str,
+                "humidity": float,
+                "wind_speed": float
+            },
+            "next_hour": {
+                "temperature": float,
+                "condition": str,
+                "humidity": float,
+                "wind_speed": float,
+                "precipitation_probability": float  # Percentage (0-100)
+            }
+        }
+    
+    Raises:
+        ValueError: If forecast array is empty or current_time is invalid
+    """
+    from datetime import timedelta
+    
+    # Parse current time
+    try:
+        current_dt = datetime.fromisoformat(current_time.replace('Z', '+00:00'))
+    except (ValueError, AttributeError):
+        raise ValueError(f"Invalid current_time format: {current_time}")
+    
+    # Get first weather entity
+    if not weather_forecast:
+        raise ValueError("weather_forecast is empty")
+    
+    entity_key = list(weather_forecast.keys())[0]
+    entity_data = weather_forecast[entity_key]
+    
+    if "forecast" not in entity_data:
+        raise ValueError(f"Weather entity {entity_key} missing 'forecast' array")
+    
+    forecast_array = entity_data["forecast"]
+    
+    if not forecast_array or len(forecast_array) == 0:
+        raise ValueError("Forecast array is empty")
+    
+    # Sort forecast by datetime to ensure chronological order
+    try:
+        sorted_forecast = sorted(
+            forecast_array,
+            key=lambda x: datetime.fromisoformat(x["datetime"].replace('Z', '+00:00'))
+        )
+    except (KeyError, ValueError, AttributeError) as e:
+        raise ValueError(f"Invalid datetime in forecast array: {str(e)}")
+    
+    # Find the forecast entry closest to current time (current hour)
+    current_forecast = None
+    next_forecast = None
+    
+    for i, forecast_item in enumerate(sorted_forecast):
+        try:
+            forecast_dt = datetime.fromisoformat(forecast_item["datetime"].replace('Z', '+00:00'))
+        except (ValueError, AttributeError, KeyError):
+            # Skip invalid datetime entries
+            continue
+        
+        # If this forecast is for current hour or just passed
+        # Check if current_time falls within this forecast's hour window
+        if forecast_dt <= current_dt < forecast_dt + timedelta(hours=1):
+            current_forecast = forecast_item
+            # Next forecast is the following entry
+            if i + 1 < len(sorted_forecast):
+                next_forecast = sorted_forecast[i + 1]
+            break
+        
+        # If we haven't found current yet and this forecast is in the future
+        # Use the first future forecast as current
+        if forecast_dt > current_dt and current_forecast is None:
+            current_forecast = forecast_item
+            if i + 1 < len(sorted_forecast):
+                next_forecast = sorted_forecast[i + 1]
+            break
+    
+    # Fallback: use first two entries if no match found
+    if current_forecast is None:
+        logger.warning(f"No forecast entry matched current_time {current_time}, using first entry")
+        current_forecast = sorted_forecast[0]
+        next_forecast = sorted_forecast[1] if len(sorted_forecast) > 1 else None
+    
+    # Handle missing next_hour edge case
+    if next_forecast is None:
+        logger.warning("No next_hour forecast available, using current_hour data")
+        next_forecast = current_forecast
+    
+    # Extract and transform data to internal format
+    # Convert precipitation from 0-1 range to percentage
+    precipitation_value = next_forecast.get("precipitation", 0)
+    if isinstance(precipitation_value, (int, float)):
+        precipitation_probability = precipitation_value * 100
+    else:
+        precipitation_probability = 0
+    
+    return {
+        "current_hour": {
+            "temperature": current_forecast["temperature"],
+            "condition": current_forecast["condition"],
+            "humidity": current_forecast["humidity"],
+            "wind_speed": current_forecast["wind_speed"]
+        },
+        "next_hour": {
+            "temperature": next_forecast["temperature"],
+            "condition": next_forecast["condition"],
+            "humidity": next_forecast["humidity"],
+            "wind_speed": next_forecast["wind_speed"],
+            "precipitation_probability": precipitation_probability
+        }
+    }
+
+
+def validate_weather_condition(condition: Dict[str, Any], condition_name: str) -> Optional[Dict[str, str]]:
+    """
+    Validate a weather condition object (current_hour or next_hour) in internal format.
+    
+    This function validates weather data in the internal format (current_hour/next_hour structure),
+    not the Home Assistant weather_forecast format. It is used to validate weather data after
+    it has been extracted and transformed by extract_weather_data().
+    
+    Args:
+        condition: Weather condition dictionary to validate (internal format)
+        condition_name: Name of the condition for error messages (e.g., "current_hour", "next_hour")
+    
+    Returns:
+        Error dict with message, details, and error_code if validation fails, None if valid
     """
     if not isinstance(condition, dict):
         return {
@@ -485,8 +743,64 @@ def validate_input(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Validate the Lambda event input.
     
+    This function validates the event structure for the laundry monitoring Lambda,
+    ensuring all required fields are present and properly formatted. It checks for
+    the presence of file_key, current_time, and weather_forecast fields, and validates
+    the nested weather forecast structure from Home Assistant.
+    
+    Expected event structure:
+    {
+        "file_key": str,
+        "current_time": str (ISO 8601 format),
+        "weather_forecast": {
+            "<entity_id>": {
+                "forecast": [
+                    {
+                        "condition": str,
+                        "datetime": str (ISO 8601 format),
+                        "temperature": float,
+                        "humidity": float,
+                        "wind_speed": float,
+                        "precipitation": float (optional, 0-1 range)
+                    },
+                    ...
+                ]
+            }
+        }
+    }
+    
+    Example:
+        >>> event = {
+        ...     "file_key": "camera_snapshot/20251110/120000_porch.jpg",
+        ...     "current_time": "2025-10-12T02:00:00+00:00",
+        ...     "weather_forecast": {
+        ...         "weather.forecast_home": {
+        ...             "forecast": [
+        ...                 {
+        ...                     "condition": "cloudy",
+        ...                     "datetime": "2025-10-12T02:00:00+00:00",
+        ...                     "temperature": 27.4,
+        ...                     "wind_speed": 11.2,
+        ...                     "precipitation": 0,
+        ...                     "humidity": 79
+        ...                 },
+        ...                 {
+        ...                     "condition": "rainy",
+        ...                     "datetime": "2025-10-12T03:00:00+00:00",
+        ...                     "temperature": 28.7,
+        ...                     "wind_speed": 9.7,
+        ...                     "precipitation": 0.65,
+        ...                     "humidity": 75
+        ...                 }
+        ...             ]
+        ...         }
+        ...     }
+        ... }
+        >>> validate_input(event)
+        None  # Returns None if validation passes
+    
     Args:
-        event: Lambda event dictionary
+        event: Lambda event dictionary containing file_key, current_time, and weather_forecast
     
     Returns:
         Error response dict if validation fails, None if valid
@@ -506,65 +820,150 @@ def validate_input(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if file_key_error:
         return {"errors": [file_key_error]}
     
-    # Validate weather_data
-    if "weather_data" not in event:
+    # Validate current_time
+    if "current_time" not in event:
         return {
             "errors": [{
-                "message": "Missing required field: weather_data",
-                "details": "The event must contain a 'weather_data' field",
+                "message": "Missing required field: current_time",
+                "details": "The event must contain a 'current_time' field",
                 "error_code": "INPUT_VALIDATION_ERROR"
             }]
         }
     
-    weather_data = event.get("weather_data")
-    if not isinstance(weather_data, dict):
+    current_time = event.get("current_time")
+    if not isinstance(current_time, str):
         return {
             "errors": [{
-                "message": "Invalid weather_data",
-                "details": "weather_data must be an object",
+                "message": "Invalid current_time",
+                "details": "current_time must be a string in ISO 8601 format",
                 "error_code": "INPUT_VALIDATION_ERROR"
             }]
         }
     
-    # Validate current_hour
-    if "current_hour" not in weather_data:
+    # Parse and validate current_time using datetime.fromisoformat()
+    try:
+        datetime.fromisoformat(current_time.replace('Z', '+00:00'))
+    except (ValueError, AttributeError):
         return {
             "errors": [{
-                "message": "Missing required field: weather_data.current_hour",
-                "details": "weather_data must contain a 'current_hour' field",
+                "message": "Invalid current_time format",
+                "details": "current_time must be a valid ISO 8601 timestamp",
                 "error_code": "INPUT_VALIDATION_ERROR"
             }]
         }
     
-    error = validate_weather_condition(weather_data["current_hour"], "current_hour")
-    if error:
-        return {"errors": [error]}
-    
-    # Validate next_hour
-    if "next_hour" not in weather_data:
+    # Validate weather_forecast
+    if "weather_forecast" not in event:
         return {
             "errors": [{
-                "message": "Missing required field: weather_data.next_hour",
-                "details": "weather_data must contain a 'next_hour' field",
+                "message": "Missing required field: weather_forecast",
+                "details": "The event must contain a 'weather_forecast' field",
                 "error_code": "INPUT_VALIDATION_ERROR"
             }]
         }
     
-    error = validate_weather_condition(weather_data["next_hour"], "next_hour")
-    if error:
-        return {"errors": [error]}
+    weather_forecast = event.get("weather_forecast")
+    if not isinstance(weather_forecast, dict):
+        return {
+            "errors": [{
+                "message": "Invalid weather_forecast",
+                "details": "weather_forecast must be an object",
+                "error_code": "INPUT_VALIDATION_ERROR"
+            }]
+        }
     
-    # Validate precipitation_probability in next_hour (optional but should be numeric if present)
-    next_hour = weather_data["next_hour"]
-    if "precipitation_probability" in next_hour:
-        if not isinstance(next_hour["precipitation_probability"], (int, float)):
+    # Extract weather entity key (use first entity if multiple exist)
+    weather_entities = list(weather_forecast.keys())
+    if len(weather_entities) == 0:
+        return {
+            "errors": [{
+                "message": "Invalid weather_forecast structure",
+                "details": "weather_forecast must contain at least one weather entity",
+                "error_code": "INPUT_VALIDATION_ERROR"
+            }]
+        }
+    
+    # Use the first weather entity
+    entity_key = weather_entities[0]
+    entity_data = weather_forecast[entity_key]
+    
+    if not isinstance(entity_data, dict):
+        return {
+            "errors": [{
+                "message": "Invalid weather entity structure",
+                "details": f"Weather entity '{entity_key}' must be an object",
+                "error_code": "INPUT_VALIDATION_ERROR"
+            }]
+        }
+    
+    # Validate weather entity contains forecast array
+    if "forecast" not in entity_data:
+        return {
+            "errors": [{
+                "message": "Invalid weather entity structure",
+                "details": f"Weather entity '{entity_key}' must contain 'forecast' array",
+                "error_code": "INPUT_VALIDATION_ERROR"
+            }]
+        }
+    
+    forecast_array = entity_data["forecast"]
+    if not isinstance(forecast_array, list):
+        return {
+            "errors": [{
+                "message": "Invalid forecast structure",
+                "details": "forecast must be an array",
+                "error_code": "INPUT_VALIDATION_ERROR"
+            }]
+        }
+    
+    # Validate forecast array has at least 2 entries
+    if len(forecast_array) < 2:
+        return {
+            "errors": [{
+                "message": "Insufficient forecast data",
+                "details": "forecast array must contain at least 2 hourly entries for current and next hour analysis",
+                "error_code": "INPUT_VALIDATION_ERROR"
+            }]
+        }
+    
+    # Validate each forecast item has datetime field in ISO 8601 format
+    # and call validate_forecast_item() for each forecast entry
+    for i, forecast_item in enumerate(forecast_array):
+        # Check for datetime field
+        if not isinstance(forecast_item, dict):
             return {
                 "errors": [{
-                    "message": "Invalid weather data: next_hour.precipitation_probability must be a number",
-                    "details": "next_hour.precipitation_probability is not a numeric value",
+                    "message": f"Invalid forecast item at index {i}",
+                    "details": f"Forecast item at index {i} must be an object",
                     "error_code": "INPUT_VALIDATION_ERROR"
                 }]
             }
+        
+        if "datetime" not in forecast_item:
+            return {
+                "errors": [{
+                    "message": f"Invalid forecast item at index {i}",
+                    "details": f"Forecast item at index {i} missing 'datetime' field",
+                    "error_code": "INPUT_VALIDATION_ERROR"
+                }]
+            }
+        
+        # Validate datetime format
+        try:
+            datetime.fromisoformat(forecast_item["datetime"].replace('Z', '+00:00'))
+        except (ValueError, AttributeError, TypeError):
+            return {
+                "errors": [{
+                    "message": f"Invalid forecast item at index {i}",
+                    "details": f"Forecast item at index {i} has invalid datetime format",
+                    "error_code": "INPUT_VALIDATION_ERROR"
+                }]
+            }
+        
+        # Validate forecast item using validate_forecast_item()
+        error = validate_forecast_item(forecast_item, f"forecast[{i}]")
+        if error:
+            return {"errors": [error]}
     
     return None
 
@@ -714,11 +1113,37 @@ def format_weather_data_for_prompt(weather_data: Dict[str, Any]) -> str:
     """
     Format weather data into natural language description for the agent prompt.
     
+    This function converts the internal weather data structure (current_hour/next_hour)
+    into a human-readable natural language description that is included in the Bedrock
+    agent prompt. It analyzes temperature changes and formats all weather parameters
+    into clear, descriptive sentences.
+    
+    Note: This function receives weather_data in internal format (current_hour/next_hour),
+    not the raw Home Assistant weather_forecast format.
+    
     Args:
-        weather_data: Dictionary containing current_hour and next_hour weather data
+        weather_data: Dictionary containing current_hour and next_hour weather data:
+            {
+                "current_hour": {
+                    "temperature": float,
+                    "condition": str,
+                    "humidity": float,
+                    "wind_speed": float
+                },
+                "next_hour": {
+                    "temperature": float,
+                    "condition": str,
+                    "humidity": float,
+                    "wind_speed": float,
+                    "precipitation_probability": float (optional)
+                }
+            }
     
     Returns:
-        Natural language description of weather conditions
+        Natural language description of weather conditions, e.g.:
+        "Current weather: cloudy, temperature 27.4°C, humidity 79%, wind speed 11.2 km/h. 
+        Next hour forecast: rainy, temperature 28.7°C, humidity 75%, wind speed 9.7 km/h, 
+        precipitation probability 65%. Temperature rising by 1.3°C."
     """
     current = weather_data["current_hour"]
     next_hour = weather_data["next_hour"]
@@ -833,14 +1258,48 @@ def invoke_bedrock_agent(
     """
     Invoke Bedrock agent to analyze laundry image with weather context.
     
+    This function sends the camera image and weather data to AWS Bedrock for AI-powered
+    analysis. The Bedrock agent detects laundry racks in open air areas, assesses weather
+    risks, and provides bilingual recommendations.
+    
+    Note: The weather_data parameter receives the internal format (current_hour/next_hour
+    structure), not the raw Home Assistant weather_forecast format. The weather_forecast
+    is transformed to weather_data by extract_weather_data() before being passed here.
+    
     Args:
-        image_bytes: Raw image bytes
+        image_bytes: Raw image bytes from R2 storage
         image_format: Image format (e.g., 'jpeg', 'png')
-        presigned_url: Presigned URL for the image
-        weather_data: Weather forecast data for current and next hour
+        presigned_url: Presigned URL for the image (included in response)
+        weather_data: Weather data in internal format with current_hour and next_hour:
+            {
+                "current_hour": {
+                    "temperature": float,
+                    "condition": str,
+                    "humidity": float,
+                    "wind_speed": float
+                },
+                "next_hour": {
+                    "temperature": float,
+                    "condition": str,
+                    "humidity": float,
+                    "wind_speed": float,
+                    "precipitation_probability": float
+                }
+            }
     
     Returns:
-        Dict containing analysis result or error information
+        Dict containing analysis result or error information:
+        {
+            "result": LocalizedLaundryAnalysisResponse  # Pydantic model with en and zh_CN
+        }
+        or
+        {
+            "error": {
+                "message": str,
+                "details": str,
+                "error_code": str
+            }
+        }
     """
     try:
         logger.info(f"Initializing Bedrock agent with model: {APPLICATION_INFERENCE_PROFILE_ARN}")
@@ -1230,19 +1689,119 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
     """
     AWS Lambda handler for laundry monitoring agent.
     
-    Analyzes security camera images to detect laundry racks and provides
-    weather-aware recommendations.
+    Analyzes security camera images to detect laundry racks in open air areas and provides
+    weather-aware recommendations to help homeowners protect their laundry from adverse
+    weather conditions.
     
-    This function implements Task 10: Comprehensive error handling.
-    All major operations are wrapped in try-except blocks with structured
-    error responses, appropriate error codes, and proper logging.
+    This function orchestrates the complete laundry monitoring workflow:
+    1. Validates input event structure (file_key, current_time, weather_forecast)
+    2. Extracts and transforms weather forecast data from Home Assistant format
+    3. Retrieves the camera image from R2 storage
+    4. Generates a presigned URL for the image
+    5. Invokes Bedrock AI agent for laundry detection and risk assessment
+    6. Validates and enriches the response with bilingual localizations
+    7. Returns structured JSON with recommendations in English and Simplified Chinese
+    
+    This function implements comprehensive error handling with structured error responses,
+    appropriate error codes, and proper logging at each step.
     
     Args:
-        event: Lambda event containing file_key and weather_data
-        context: Lambda context object
+        event: Lambda event dictionary containing:
+            - file_key (str): R2 object key for the camera snapshot image
+            - current_time (str): ISO 8601 timestamp for current time context
+            - weather_forecast (dict): Home Assistant weather forecast structure with entity data
+        context: Lambda context object (provided by AWS Lambda runtime)
     
     Returns:
-        Dict containing analysis results or error information
+        Dict containing analysis results or error information:
+        
+        Success response:
+        {
+            "data": {
+                "result": {
+                    "en": {
+                        "laundry_detected": bool,
+                        "laundry_description": str,
+                        "weather_risk_level": "low|medium|high",
+                        "weather_summary": str,
+                        "recommendation": "bring_inside|leave_outside|no_action",
+                        "recommendation_reason": str,
+                        "confidence": float,
+                        "timestamp": str,
+                        "image_url": str
+                    },
+                    "zh_CN": { ... }  # Same structure in Simplified Chinese
+                }
+            }
+        }
+        
+        Error response:
+        {
+            "errors": [{
+                "message": str,
+                "details": str,
+                "error_code": str
+            }]
+        }
+    
+    Expected event structure:
+        {
+            "file_key": "camera_snapshot/20251110/120000_porch.jpg",
+            "current_time": "2025-10-12T02:00:00+00:00",
+            "weather_forecast": {
+                "weather.forecast_home": {
+                    "forecast": [
+                        {
+                            "condition": "cloudy",
+                            "datetime": "2025-10-12T02:00:00+00:00",
+                            "temperature": 27.4,
+                            "wind_speed": 11.2,
+                            "precipitation": 0,
+                            "humidity": 79
+                        },
+                        {
+                            "condition": "rainy",
+                            "datetime": "2025-10-12T03:00:00+00:00",
+                            "temperature": 28.7,
+                            "wind_speed": 9.7,
+                            "precipitation": 0.65,
+                            "humidity": 75
+                        }
+                    ]
+                }
+            }
+        }
+    
+    Example usage:
+        >>> event = {
+        ...     "file_key": "camera_snapshot/20251110/120000_porch.jpg",
+        ...     "current_time": "2025-10-12T02:00:00+00:00",
+        ...     "weather_forecast": {
+        ...         "weather.forecast_home": {
+        ...             "forecast": [
+        ...                 {
+        ...                     "condition": "cloudy",
+        ...                     "datetime": "2025-10-12T02:00:00+00:00",
+        ...                     "temperature": 27.4,
+        ...                     "wind_speed": 11.2,
+        ...                     "precipitation": 0,
+        ...                     "humidity": 79
+        ...                 },
+        ...                 {
+        ...                     "condition": "rainy",
+        ...                     "datetime": "2025-10-12T03:00:00+00:00",
+        ...                     "temperature": 28.7,
+        ...                     "wind_speed": 9.7,
+        ...                     "precipitation": 0.65,
+        ...                     "humidity": 75
+        ...                 }
+        ...             ]
+        ...         }
+        ...     }
+        ... }
+        >>> result = handler(event, None)
+        >>> result["data"]["result"]["en"]["recommendation"]
+        'bring_inside'  # Example output
     """
     try:
         # Task 11: Check for environment variable initialization errors
@@ -1254,7 +1813,8 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         # Log event (sanitize to avoid exposing sensitive data)
         sanitized_event = {
             "file_key": event.get("file_key", ""),
-            "weather_data": "present" if "weather_data" in event else "missing"
+            "current_time": event.get("current_time", ""),
+            "weather_forecast": "present" if "weather_forecast" in event else "missing"
         }
         logger.info(f"Received event: {json.dumps(sanitized_event)}")
         
@@ -1275,7 +1835,22 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
             }
         
         file_key = event["file_key"]
-        weather_data = event["weather_data"]
+        current_time = event["current_time"]
+        weather_forecast = event["weather_forecast"]
+        
+        # Extract and transform weather data from Home Assistant format to internal format
+        try:
+            weather_data = extract_weather_data(weather_forecast, current_time)
+            logger.debug(f"Successfully extracted weather data from forecast")
+        except Exception as e:
+            logger.error(f"Failed to extract weather data: {str(e)}", exc_info=True)
+            return {
+                "errors": [{
+                    "message": "Weather data extraction error",
+                    "details": f"Failed to extract weather data from forecast: {str(e)}",
+                    "error_code": "INPUT_VALIDATION_ERROR"
+                }]
+            }
         
         logger.info(f"Processing laundry analysis for file_key: {file_key}")
         logger.debug(f"Weather data structure validated")
@@ -1458,44 +2033,75 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
 
 
 if __name__ == "__main__":
-    # Test with valid input
+    # Test with valid input using weather_forecast and current_time
     test_event = {
         "file_key": "camera_snapshot/20251110/120000_porch.jpg",
-        "weather_data": {
-            "current_hour": {
-                "temperature": 28.5,
-                "condition": "clear",
-                "humidity": 65.0,
-                "wind_speed": 12.5
-            },
-            "next_hour": {
-                "temperature": 29.0,
-                "condition": "cloudy",
-                "humidity": 70.0,
-                "wind_speed": 15.0,
-                "precipitation_probability": 20.0
+        "current_time": "2025-10-12T02:00:00+00:00",
+        "weather_forecast": {
+            "weather.forecast_home": {
+                "forecast": [
+                    {
+                        "condition": "clear",
+                        "datetime": "2025-10-12T02:00:00+00:00",
+                        "temperature": 28.5,
+                        "wind_speed": 12.5,
+                        "precipitation": 0,
+                        "humidity": 65.0,
+                        "wind_bearing": 180.0,
+                        "cloud_coverage": 10.0,
+                        "uv_index": 5.0
+                    },
+                    {
+                        "condition": "cloudy",
+                        "datetime": "2025-10-12T03:00:00+00:00",
+                        "temperature": 29.0,
+                        "wind_speed": 15.0,
+                        "precipitation": 0.20,
+                        "humidity": 70.0,
+                        "wind_bearing": 190.0,
+                        "cloud_coverage": 60.0,
+                        "uv_index": 4.5
+                    },
+                    {
+                        "condition": "rainy",
+                        "datetime": "2025-10-12T04:00:00+00:00",
+                        "temperature": 27.0,
+                        "wind_speed": 18.0,
+                        "precipitation": 0.75,
+                        "humidity": 85.0
+                    }
+                ]
             }
         }
     }
     
     result = handler(test_event, None)
-    print("Valid input test:")
+    print("Valid input test with weather_forecast and current_time:")
     print(json.dumps(result, indent=2))
     
     # Test with missing file_key
     invalid_event_1 = {
-        "weather_data": {
-            "current_hour": {
-                "temperature": 28.5,
-                "condition": "clear",
-                "humidity": 65.0,
-                "wind_speed": 12.5
-            },
-            "next_hour": {
-                "temperature": 29.0,
-                "condition": "cloudy",
-                "humidity": 70.0,
-                "wind_speed": 15.0
+        "current_time": "2025-10-12T02:00:00+00:00",
+        "weather_forecast": {
+            "weather.forecast_home": {
+                "forecast": [
+                    {
+                        "condition": "clear",
+                        "datetime": "2025-10-12T02:00:00+00:00",
+                        "temperature": 28.5,
+                        "wind_speed": 12.5,
+                        "precipitation": 0,
+                        "humidity": 65.0
+                    },
+                    {
+                        "condition": "cloudy",
+                        "datetime": "2025-10-12T03:00:00+00:00",
+                        "temperature": 29.0,
+                        "wind_speed": 15.0,
+                        "precipitation": 0.20,
+                        "humidity": 70.0
+                    }
+                ]
             }
         }
     }
@@ -1504,79 +2110,163 @@ if __name__ == "__main__":
     print("\nMissing file_key test:")
     print(json.dumps(result, indent=2))
     
-    # Test with missing weather_data
+    # Test with missing weather_forecast
     invalid_event_2 = {
-        "file_key": "camera_snapshot/20251110/120000_porch.jpg"
+        "file_key": "camera_snapshot/20251110/120000_porch.jpg",
+        "current_time": "2025-10-12T02:00:00+00:00"
     }
     
     result = handler(invalid_event_2, None)
-    print("\nMissing weather_data test:")
+    print("\nMissing weather_forecast test:")
     print(json.dumps(result, indent=2))
     
-    # Test with invalid weather structure
+    # Test with missing current_time
     invalid_event_3 = {
         "file_key": "camera_snapshot/20251110/120000_porch.jpg",
-        "weather_data": {
-            "current_hour": {
-                "temperature": 28.5,
-                "condition": "clear"
-                # Missing humidity and wind_speed
-            },
-            "next_hour": {
-                "temperature": 29.0,
-                "condition": "cloudy",
-                "humidity": 70.0,
-                "wind_speed": 15.0
+        "weather_forecast": {
+            "weather.forecast_home": {
+                "forecast": [
+                    {
+                        "condition": "clear",
+                        "datetime": "2025-10-12T02:00:00+00:00",
+                        "temperature": 28.5,
+                        "wind_speed": 12.5,
+                        "precipitation": 0,
+                        "humidity": 65.0
+                    },
+                    {
+                        "condition": "cloudy",
+                        "datetime": "2025-10-12T03:00:00+00:00",
+                        "temperature": 29.0,
+                        "wind_speed": 15.0,
+                        "precipitation": 0.20,
+                        "humidity": 70.0
+                    }
+                ]
             }
         }
     }
     
     result = handler(invalid_event_3, None)
-    print("\nInvalid weather structure test:")
+    print("\nMissing current_time test:")
     print(json.dumps(result, indent=2))
     
-    # Test with path traversal attempt
+    # Test with invalid current_time format
     invalid_event_4 = {
-        "file_key": "../../../etc/passwd",
-        "weather_data": {
-            "current_hour": {
-                "temperature": 28.5,
-                "condition": "clear",
-                "humidity": 65.0,
-                "wind_speed": 12.5
-            },
-            "next_hour": {
-                "temperature": 29.0,
-                "condition": "cloudy",
-                "humidity": 70.0,
-                "wind_speed": 15.0
+        "file_key": "camera_snapshot/20251110/120000_porch.jpg",
+        "current_time": "not-a-valid-timestamp",
+        "weather_forecast": {
+            "weather.forecast_home": {
+                "forecast": [
+                    {
+                        "condition": "clear",
+                        "datetime": "2025-10-12T02:00:00+00:00",
+                        "temperature": 28.5,
+                        "wind_speed": 12.5,
+                        "precipitation": 0,
+                        "humidity": 65.0
+                    },
+                    {
+                        "condition": "cloudy",
+                        "datetime": "2025-10-12T03:00:00+00:00",
+                        "temperature": 29.0,
+                        "wind_speed": 15.0,
+                        "precipitation": 0.20,
+                        "humidity": 70.0
+                    }
+                ]
             }
         }
     }
     
     result = handler(invalid_event_4, None)
-    print("\nPath traversal attack test:")
+    print("\nInvalid current_time format test:")
     print(json.dumps(result, indent=2))
     
-    # Test with absolute path
+    # Test with insufficient forecast entries (less than 2)
     invalid_event_5 = {
-        "file_key": "/etc/passwd",
-        "weather_data": {
-            "current_hour": {
-                "temperature": 28.5,
-                "condition": "clear",
-                "humidity": 65.0,
-                "wind_speed": 12.5
-            },
-            "next_hour": {
-                "temperature": 29.0,
-                "condition": "cloudy",
-                "humidity": 70.0,
-                "wind_speed": 15.0
+        "file_key": "camera_snapshot/20251110/120000_porch.jpg",
+        "current_time": "2025-10-12T02:00:00+00:00",
+        "weather_forecast": {
+            "weather.forecast_home": {
+                "forecast": [
+                    {
+                        "condition": "clear",
+                        "datetime": "2025-10-12T02:00:00+00:00",
+                        "temperature": 28.5,
+                        "wind_speed": 12.5,
+                        "precipitation": 0,
+                        "humidity": 65.0
+                    }
+                ]
             }
         }
     }
     
     result = handler(invalid_event_5, None)
-    print("\nAbsolute path test:")
+    print("\nInsufficient forecast entries test:")
+    print(json.dumps(result, indent=2))
+    
+    # Test with path traversal attempt using weather_forecast
+    invalid_event_6 = {
+        "file_key": "../../../etc/passwd",
+        "current_time": "2025-10-12T02:00:00+00:00",
+        "weather_forecast": {
+            "weather.forecast_home": {
+                "forecast": [
+                    {
+                        "condition": "clear",
+                        "datetime": "2025-10-12T02:00:00+00:00",
+                        "temperature": 28.5,
+                        "wind_speed": 12.5,
+                        "precipitation": 0,
+                        "humidity": 65.0
+                    },
+                    {
+                        "condition": "cloudy",
+                        "datetime": "2025-10-12T03:00:00+00:00",
+                        "temperature": 29.0,
+                        "wind_speed": 15.0,
+                        "precipitation": 0.20,
+                        "humidity": 70.0
+                    }
+                ]
+            }
+        }
+    }
+    
+    result = handler(invalid_event_6, None)
+    print("\nPath traversal attack test with weather_forecast:")
+    print(json.dumps(result, indent=2))
+    
+    # Test with absolute path using weather_forecast
+    invalid_event_7 = {
+        "file_key": "/etc/passwd",
+        "current_time": "2025-10-12T02:00:00+00:00",
+        "weather_forecast": {
+            "weather.forecast_home": {
+                "forecast": [
+                    {
+                        "condition": "clear",
+                        "datetime": "2025-10-12T02:00:00+00:00",
+                        "temperature": 28.5,
+                        "wind_speed": 12.5,
+                        "precipitation": 0,
+                        "humidity": 65.0
+                    },
+                    {
+                        "condition": "cloudy",
+                        "datetime": "2025-10-12T03:00:00+00:00",
+                        "temperature": 29.0,
+                        "wind_speed": 15.0,
+                        "precipitation": 0.20,
+                        "humidity": 70.0
+                    }
+                ]
+            }
+        }
+    }
+    
+    result = handler(invalid_event_7, None)
+    print("\nAbsolute path test with weather_forecast:")
     print(json.dumps(result, indent=2))

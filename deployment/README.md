@@ -123,19 +123,33 @@ Use this example payload to test the Lambda function:
 ```json
 {
   "file_key": "camera_snapshot/20251110/120000_porch.jpg",
-  "weather_data": {
-    "current_hour": {
-      "temperature": 28.5,
-      "condition": "cloudy",
-      "humidity": 65.0,
-      "wind_speed": 15.0
-    },
-    "next_hour": {
-      "temperature": 27.0,
-      "condition": "rainy",
-      "humidity": 80.0,
-      "wind_speed": 20.0,
-      "precipitation_probability": 75.0
+  "current_time": "2025-11-10T12:00:00+00:00",
+  "weather_forecast": {
+    "weather.forecast_home": {
+      "forecast": [
+        {
+          "condition": "cloudy",
+          "datetime": "2025-11-10T12:00:00+00:00",
+          "temperature": 28.5,
+          "wind_speed": 15.0,
+          "precipitation": 0.0,
+          "humidity": 65.0,
+          "wind_bearing": 180.0,
+          "cloud_coverage": 75.0,
+          "uv_index": 5.0
+        },
+        {
+          "condition": "rainy",
+          "datetime": "2025-11-10T13:00:00+00:00",
+          "temperature": 27.0,
+          "wind_speed": 20.0,
+          "precipitation": 0.75,
+          "humidity": 80.0,
+          "wind_bearing": 190.0,
+          "cloud_coverage": 95.0,
+          "uv_index": 3.0
+        }
+      ]
     }
   }
 }
@@ -241,18 +255,23 @@ cat response.json | jq
   - Example: `"camera_snapshot/20251110/120000_porch.jpg"`
   - Must be a valid path within the configured R2 bucket
 
-- **weather_data** (object): Weather forecast data for analysis
-  - **current_hour** (object): Current hour weather conditions
-    - **temperature** (float): Temperature in Celsius
-    - **condition** (string): Weather condition (e.g., "clear", "cloudy", "rainy")
-    - **humidity** (float): Humidity percentage (0-100)
-    - **wind_speed** (float): Wind speed in km/h
-  - **next_hour** (object): Next hour weather forecast
-    - **temperature** (float): Temperature in Celsius
-    - **condition** (string): Weather condition
-    - **humidity** (float): Humidity percentage (0-100)
-    - **wind_speed** (float): Wind speed in km/h
-    - **precipitation_probability** (float): Precipitation probability percentage (0-100)
+- **current_time** (string): ISO 8601 timestamp representing the current time context
+  - Example: `"2025-11-10T12:00:00+00:00"`
+  - Used to identify which forecast entries correspond to current and next hour
+  - Must be a valid ISO 8601 formatted timestamp
+
+- **weather_forecast** (object): Home Assistant weather entity structure with forecast data
+  - **<entity_id>** (object): Weather entity (e.g., "weather.forecast_home")
+    - **forecast** (array): Array of hourly forecast entries (minimum 2 required)
+      - **condition** (string): Weather condition (e.g., "clear", "cloudy", "rainy")
+      - **datetime** (string): ISO 8601 timestamp for this forecast entry
+      - **temperature** (float): Temperature in Celsius
+      - **humidity** (float): Humidity percentage (0-100)
+      - **wind_speed** (float): Wind speed in km/h
+      - **precipitation** (float): Precipitation probability (0-1 range, converted to percentage internally)
+      - **wind_bearing** (float): Wind direction in degrees (optional)
+      - **cloud_coverage** (float): Cloud coverage percentage (optional)
+      - **uv_index** (float): UV index (optional)
 
 ## Monitoring and Troubleshooting
 
@@ -278,8 +297,10 @@ aws logs tail /aws/lambda/laundryMonitoringAgentFunction --follow
 
 3. **"Input validation error"**
    - Verify event payload matches the required schema
-   - Check that all required fields are present
-   - Ensure weather_data contains both current_hour and next_hour
+   - Check that all required fields are present (file_key, current_time, weather_forecast)
+   - Ensure current_time is in valid ISO 8601 format
+   - Ensure weather_forecast contains a weather entity with a forecast array
+   - Verify forecast array has at least 2 entries with required fields
 
 4. **Timeout errors**
    - Lambda timeout is set to 30 seconds

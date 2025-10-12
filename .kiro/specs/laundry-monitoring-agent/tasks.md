@@ -10,8 +10,11 @@
 
 - [x] 3. Implement Lambda handler function
   - Create `src/laundry_monitoring_agent.py` with `handler(event, context)` function
-  - Parse and validate input event for required fields (file_key, weather_data)
-  - Validate weather_data structure (current_hour and next_hour with all required fields)
+  - Parse and validate input event for required fields (file_key, current_time, weather_forecast)
+  - Validate current_time is in ISO 8601 format
+  - Validate weather_forecast structure (entity with forecast array containing at least 2 entries)
+  - Validate each forecast item has required fields (condition, datetime, temperature, humidity, wind_speed)
+  - Extract and transform weather forecast data using current_time to identify current_hour and next_hour
   - Implement error handling for missing or malformed input
   - Return structured error response for validation failures
   - _Requirements: 6.1, 6.4_

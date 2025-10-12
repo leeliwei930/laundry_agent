@@ -70,13 +70,14 @@ External Dependencies:
 
 ### Component Interaction Flow
 
-1. **Event Reception**: Lambda receives event with `file_key` and `weather_data`
-2. **Image Retrieval**: Downloads image from R2 using boto3 S3 client
-3. **URL Generation**: Creates presigned URL for image reference (7-day expiration)
-4. **Agent Initialization**: Sets up Bedrock agent with custom system prompt
-5. **Analysis Execution**: Sends image and weather data to Bedrock for analysis
-6. **Response Validation**: Validates output against Pydantic schema
-7. **Result Return**: Returns structured JSON with bilingual analysis
+1. **Event Reception**: Lambda receives event with `file_key`, `current_time`, and `weather_forecast`
+2. **Weather Extraction**: Transforms Home Assistant forecast format to internal format using `current_time`
+3. **Image Retrieval**: Downloads image from R2 using boto3 S3 client
+4. **URL Generation**: Creates presigned URL for image reference (7-day expiration)
+5. **Agent Initialization**: Sets up Bedrock agent with custom system prompt
+6. **Analysis Execution**: Sends image and weather data to Bedrock for analysis
+7. **Response Validation**: Validates output against Pydantic schema
+8. **Result Return**: Returns structured JSON with bilingual analysis
 
 ## Image Analysis Strategy
 
@@ -129,25 +130,29 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]
 ```python
 {
     "file_key": str,  # R2 object key (e.g., "camera_snapshot/20251110/120000_porch.jpg")
-    "weather_data": {
-        "current_hour": {  # Requirement 2.1: Current hour weather forecast
-            "temperature": float,  # Celsius - for temperature analysis (Req 2.3)
-            "condition": str,      # e.g., "clear", "cloudy", "rainy" - for adverse condition detection (Req 2.4)
-            "humidity": float,     # Percentage
-            "wind_speed": float    # km/h - for wind risk assessment (Req 3.4)
-        },
-        "next_hour": {  # Requirement 2.2: Upcoming hour weather forecast
-            "temperature": float,
-            "condition": str,
-            "humidity": float,
-            "wind_speed": float,
-            "precipitation_probability": float  # Percentage - for rain risk flagging (Req 2.5)
+    "current_time": str,  # ISO 8601 timestamp for current time context (e.g., "2025-10-12T02:00:00+00:00")
+    "weather_forecast": {  # Home Assistant weather entity structure
+        "<entity_id>": {  # e.g., "weather.forecast_home"
+            "forecast": [  # Array of hourly forecasts
+                {
+                    "condition": str,  # e.g., "clear", "cloudy", "rainy" - for adverse condition detection (Req 2.4)
+                    "datetime": str,  # ISO 8601 timestamp
+                    "temperature": float,  # Celsius - for temperature analysis (Req 2.3)
+                    "wind_speed": float,  # km/h - for wind risk assessment (Req 3.4)
+                    "precipitation": float,  # 0-1 range (converted to percentage) - for rain risk flagging (Req 2.5)
+                    "humidity": float,  # Percentage
+                    "wind_bearing": float,  # Optional
+                    "cloud_coverage": float,  # Optional
+                    "uv_index": float  # Optional
+                },
+                # ... more hourly forecasts
+            ]
         }
     }
 }
 ```
 
-**Design Rationale**: The event schema separates current and upcoming weather data to enable time-based risk assessment. Including both temperature and precipitation data allows the agent to evaluate both drying efficiency and rain risk, addressing Requirements 2.3 and 2.5.
+**Design Rationale**: The event schema uses Home Assistant's native weather forecast format with entity IDs, providing a forecast array with datetime stamps. The `current_time` parameter enables intelligent matching of forecast entries to current and next hour, making the system robust to varying forecast intervals and start times. The Lambda function extracts relevant forecast entries and transforms them into the internal format (current_hour/next_hour) for analysis, addressing Requirements 2.1, 2.2, 2.3, and 2.5.
 
 **Output Schema** (per Requirements 4 & 5):
 ```python
@@ -174,7 +179,8 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]
 **Design Rationale**: The dual-language structure at the top level ensures both localizations are always provided together, maintaining consistency. The error format provides both user-friendly messages and technical details for debugging, satisfying Requirement 4.9.
 
 **Responsibilities**:
-- Parse and validate input event containing file_key and weather_data (Requirement 6.1)
+- Parse and validate input event containing file_key, current_time, and weather_forecast (Requirement 6.1)
+- Extract and transform weather forecast data using current_time to identify relevant forecast entries
 - Retrieve image from R2 storage using provided file key (Requirement 6.2)
 - Generate presigned URL for image with 7-day expiration (Requirement 6.6)
 - Initialize Bedrock agent with specialized system prompt
@@ -403,8 +409,10 @@ ELSE:
 ### Error Categories
 
 1. **Input Validation Errors** (Requirement 6.4)
-   - Missing required fields (`file_key`, `weather_data`)
-   - Invalid weather data format (missing current_hour or next_hour)
+   - Missing required fields (`file_key`, `current_time`, `weather_forecast`)
+   - Invalid current_time format (not ISO 8601)
+   - Invalid weather_forecast structure (missing entity, missing forecast array, insufficient entries)
+   - Invalid forecast item fields (missing required fields, invalid datetime format)
    - Malformed event structure
    - Invalid file_key format (path traversal attempts)
 
