@@ -83,6 +83,29 @@ class LaundryAnalysisResponse(BaseModel):
         max_length=600
     )
     
+    notification_title: str = Field(
+        description=(
+            "Concise, actionable notification title for push notifications (Requirement 4.9). "
+            "Max 60 characters. Should clearly indicate the action needed or status. "
+            "Use emojis when appropriate for visual clarity. "
+            "Examples: '⚠️ Bring Laundry Inside!', '🌧️ Rain Coming Soon', "
+            "'✅ Laundry Safe Outside', 'ℹ️ No Action Needed' (Requirement 5.6)"
+        ),
+        max_length=60
+    )
+    
+    notification_message: str = Field(
+        description=(
+            "Clear, informative notification message for mobile notifications (Requirement 4.10). "
+            "Max 200 characters. Should provide key details about weather risk and recommendation. "
+            "Include laundry location if detected and specific weather threat. "
+            "Examples: 'Rain forecasted in 1 hour (65% chance). Laundry detected on left side of porch.', "
+            "'Clear weather ahead. Laundry on porch can continue drying safely.', "
+            "'No laundry detected in open air areas.' (Requirement 5.7)"
+        ),
+        max_length=200
+    )
+    
     confidence: float = Field(
         description=(
             "Confidence score for the analysis (0.0-1.0) (Requirements 3.6, 4.6). "
@@ -183,7 +206,8 @@ class LocalizedLaundryAnalysisResponse(BaseModel):
     zh_CN: LaundryAnalysisResponse = Field(
         description=(
             "Simplified Chinese localization of the analysis (Requirement 5.2). "
-            "All text fields must be translated to Simplified Chinese while "
+            "All text fields including notification_title and notification_message "
+            "must be translated to Simplified Chinese while "
             "maintaining consistent meaning with the English version (Requirement 5.4). "
             "For technical terms that cannot be translated, use the original term "
             "with an explanation in Chinese (Requirement 5.5)."
@@ -201,6 +225,8 @@ class LocalizedLaundryAnalysisResponse(BaseModel):
                     "weather_summary": "Rain forecast in next hour with 80% probability. Wind speed 25 km/h.",
                     "recommendation": "bring_inside",
                     "recommendation_reason": "High risk of laundry getting wet due to imminent rain. Bring inside immediately.",
+                    "notification_title": "⚠️ Bring Laundry Inside!",
+                    "notification_message": "Rain forecasted in 1 hour (80% chance). Laundry detected in center of porch.",
                     "confidence": 0.85,
                     "timestamp": "2025-11-10T14:30:00.000Z",
                     "image_url": "https://example.r2.cloudflarestorage.com/..."
@@ -212,6 +238,8 @@ class LocalizedLaundryAnalysisResponse(BaseModel):
                     "weather_summary": "下一小时有雨，降雨概率80%。风速25公里/小时。",
                     "recommendation": "bring_inside",
                     "recommendation_reason": "即将下雨，衣物被淋湿的风险很高。请立即收回室内。",
+                    "notification_title": "⚠️ 快收衣服！",
+                    "notification_message": "1小时后有雨（80%概率）。门廊中央检测到晾晒衣物。",
                     "confidence": 0.85,
                     "timestamp": "2025-11-10T14:30:00.000Z",
                     "image_url": "https://example.r2.cloudflarestorage.com/..."

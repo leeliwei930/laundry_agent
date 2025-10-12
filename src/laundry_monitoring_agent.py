@@ -318,6 +318,8 @@ Return a JSON object with this exact structure:
     "weather_summary": "string - brief summary of current and upcoming weather conditions (max 50 words)",
     "recommendation": "bring_inside|leave_outside|no_action",
     "recommendation_reason": "string - explanation for the recommendation referencing specific weather factors (max 100 words)",
+    "notification_title": "string - concise, actionable title for push notifications (max 60 characters)",
+    "notification_message": "string - clear, informative message for mobile notifications (max 200 characters)",
     "confidence": float (0.0-1.0),
     "timestamp": "ISO 8601 timestamp of analysis",
     "image_url": "presigned URL of analyzed image"
@@ -329,6 +331,8 @@ Return a JSON object with this exact structure:
     "weather_summary": "string - 当前和未来天气状况的简要总结（最多50字）",
     "recommendation": "bring_inside|leave_outside|no_action",
     "recommendation_reason": "string - 建议的解释，引用具体天气因素（最多100字）",
+    "notification_title": "string - 简洁、可操作的推送通知标题（最多60字符）",
+    "notification_message": "string - 清晰、信息丰富的移动通知消息（最多200字符）",
     "confidence": float (0.0-1.0),
     "timestamp": "ISO 8601 时间戳",
     "image_url": "已分析图像的预签名URL"
@@ -336,7 +340,7 @@ Return a JSON object with this exact structure:
 }
 ```
 
-### Field Requirements (Requirements 4.2-4.8)
+### Field Requirements (Requirements 4.2-4.10)
 
 - **laundry_detected** (Requirement 4.2): Boolean indicating presence of laundry in open air
 - **laundry_description** (Requirement 4.3): Detailed description including location and items, or "No laundry detected"
@@ -344,6 +348,8 @@ Return a JSON object with this exact structure:
 - **weather_summary**: Concise weather overview (max 50 words)
 - **recommendation** (Requirement 4.5): One of "bring_inside", "leave_outside", "no_action"
 - **recommendation_reason**: Clear explanation with specific weather factors (max 100 words)
+- **notification_title** (Requirement 4.9): Concise, actionable title for push notifications (max 60 characters). Use emojis when appropriate (⚠️, 🌧️, ✅, ℹ️). Examples: "⚠️ Bring Laundry Inside!", "✅ Laundry Safe Outside", "ℹ️ No Action Needed"
+- **notification_message** (Requirement 4.10): Clear, informative message for mobile notifications (max 200 characters). Include key details: weather risk, laundry location, and urgency. Examples: "Rain forecasted in 1 hour (65% chance). Laundry detected on left side of porch.", "Clear weather ahead. Laundry on porch can continue drying safely."
 - **confidence** (Requirement 4.6): Float between 0.0 and 1.0
 - **timestamp** (Requirement 4.7): Current time in ISO 8601 format (will be added by system)
 - **image_url** (Requirement 4.8): Presigned URL (will be added by system)
@@ -355,9 +361,26 @@ Return a JSON object with this exact structure:
 3. **Analyze the weather data** provided for current and next hour
 4. **Assess the risk level** based on precipitation, wind, temperature, and conditions
 5. **Make a recommendation** following the decision rules above
-6. **Assign confidence** based on image quality and certainty
-7. **Provide complete bilingual output** in both English and Simplified Chinese
-8. **Be specific and actionable** - homeowners need clear guidance
+6. **Create notification content** that is concise and actionable:
+   - Title: Clear action or status (max 60 chars) with appropriate emoji
+   - Message: Key details about weather and laundry location (max 200 chars)
+7. **Assign confidence** based on image quality and certainty
+8. **Provide complete bilingual output** in both English and Simplified Chinese
+9. **Be specific and actionable** - homeowners need clear guidance
+
+### Notification Content Guidelines
+
+**For High Risk (bring_inside)**:
+- Title: Use ⚠️ emoji, urgent action verb (e.g., "⚠️ Bring Laundry Inside!", "⚠️ 快收衣服！")
+- Message: State weather threat, probability, and laundry location
+
+**For Low Risk (leave_outside)**:
+- Title: Use ✅ emoji, reassuring message (e.g., "✅ Laundry Safe Outside", "✅ 衣物可继续晾晒")
+- Message: Confirm safe conditions and location
+
+**For No Action (no_action)**:
+- Title: Use ℹ️ emoji, informative (e.g., "ℹ️ No Action Needed", "ℹ️ 无需操作")
+- Message: State no laundry detected
 
 Remember: Your primary goal is to help homeowners protect their laundry from getting wet or damaged. When in doubt about weather risks, err on the side of caution and recommend bringing laundry inside."""
 
