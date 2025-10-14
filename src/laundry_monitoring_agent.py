@@ -13,6 +13,7 @@ import io
 # Import strands for Bedrock agent
 from strands import Agent
 from strands.models import BedrockModel
+from strands.models.openai import OpenAIModel
 from strands.types.agent import AgentInput
 
 # Import Pydantic models
@@ -24,41 +25,58 @@ from models.laundry_analysis_response import LocalizedLaundryAnalysisResponse
 # 
 # Required environment variables for Lambda function operation:
 #
-# 1. APPLICATION_INFERENCE_PROFILE_ARN (Required)
+# 1. MODEL_PROVIDER (Optional)
+#    - AI model provider to use: "bedrock" or "openrouter"
+#    - Default: "bedrock" if not specified
+#    - Determines which AI service to use for image analysis
+#
+# 2. APPLICATION_INFERENCE_PROFILE_ARN (Required if MODEL_PROVIDER=bedrock)
 #    - AWS Bedrock application inference profile ARN
 #    - Used for AI model invocation to analyze laundry images
 #    - Format: arn:aws:bedrock:region:account:application-inference-profile/id
 #    - Example: arn:aws:bedrock:ap-southeast-1:123456789012:application-inference-profile/abc123
 #
-# 2. R2_ACCESS_KEY_ID (Required)
+# 3. OPENROUTER_AI_URL (Required if MODEL_PROVIDER=openrouter)
+#    - OpenRouter API base URL
+#    - Example: https://openrouter.ai/api/v1
+#
+# 4. OPENROUTER_AI_MODEL_ID (Required if MODEL_PROVIDER=openrouter)
+#    - OpenRouter model identifier
+#    - Example: anthropic/claude-3.5-sonnet
+#
+# 5. OPENROUTER_AI_API_KEY (Required if MODEL_PROVIDER=openrouter)
+#    - OpenRouter API key for authentication
+#    - Keep this value secure and never log or expose it
+#
+# 6. R2_ACCESS_KEY_ID (Required)
 #    - Cloudflare R2 storage access key ID
 #    - Used for authenticating with R2 storage to retrieve images
 #    - Obtain from Cloudflare R2 dashboard
 #
-# 3. R2_SECRET_ACCESS_KEY (Required)
+# 7. R2_SECRET_ACCESS_KEY (Required)
 #    - Cloudflare R2 storage secret access key
 #    - Used for authenticating with R2 storage to retrieve images
 #    - Keep this value secure and never log or expose it
 #
-# 4. R2_ENDPOINT_URL (Required)
+# 8. R2_ENDPOINT_URL (Required)
 #    - Cloudflare R2 storage endpoint URL
 #    - Format: https://<account-id>.r2.cloudflarestorage.com
 #    - Example: https://abc123.r2.cloudflarestorage.com
 #
-# 5. R2_BUCKET_NAME (Required)
+# 9. R2_BUCKET_NAME (Required)
 #    - Name of the R2 bucket containing security camera images
 #    - Example: security-camera-snapshots
 #
-# 6. APP_DEBUG (Optional)
-#    - Logging level for the application
-#    - Valid values: DEBUG, INFO, WARNING, ERROR, CRITICAL
-#    - Default: WARNING
-#    - Use DEBUG for development, WARNING or ERROR for production
+# 10. APP_DEBUG (Optional)
+#     - Logging level for the application
+#     - Valid values: DEBUG, INFO, WARNING, ERROR, CRITICAL
+#     - Default: WARNING
+#     - Use DEBUG for development, WARNING or ERROR for production
 #
-# 7. BEDROCK_REGION (Optional)
-#    - AWS region for Bedrock service
-#    - Default: ap-southeast-1
-#    - Should match the region in APPLICATION_INFERENCE_PROFILE_ARN
+# 11. BEDROCK_REGION (Optional)
+#     - AWS region for Bedrock service
+#     - Default: ap-southeast-1
+#     - Should match the region in APPLICATION_INFERENCE_PROFILE_ARN
 #
 # ============================================================================
 
@@ -70,6 +88,11 @@ R2_BUCKET_NAME = os.environ.get("R2_BUCKET_NAME")
 APPLICATION_INFERENCE_PROFILE_ARN = os.environ.get("APPLICATION_INFERENCE_PROFILE_ARN")
 BEDROCK_REGION = os.environ.get("BEDROCK_REGION", "ap-southeast-1")
 APP_DEBUG = os.environ.get("APP_DEBUG", "WARNING")
+
+MODEL_PROVIDER = os.environ.get("MODEL_PROVIDER")
+OPENROUTER_AI_URL = os.environ.get("OPENROUTER_AI_URL")
+OPENROUTER_AI_MODEL_ID = os.environ.get("OPENROUTER_AI_MODEL_ID")
+OPENROUTER_AI_API_KEY = os.environ.get("OPENROUTER_AI_API_KEY")
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -112,9 +135,21 @@ def validate_environment_variables() -> Optional[Dict[str, Any]]:
     if not R2_BUCKET_NAME:
         missing_vars.append("R2_BUCKET_NAME")
     
-    # Check required Bedrock configuration variable
-    if not APPLICATION_INFERENCE_PROFILE_ARN:
-        missing_vars.append("APPLICATION_INFERENCE_PROFILE_ARN")
+    # Check model provider configuration
+    if MODEL_PROVIDER == "bedrock":
+        if not APPLICATION_INFERENCE_PROFILE_ARN:
+            missing_vars.append("APPLICATION_INFERENCE_PROFILE_ARN")
+    elif MODEL_PROVIDER == "openrouter":
+        if not OPENROUTER_AI_URL:
+            missing_vars.append("OPENROUTER_AI_URL")
+        if not OPENROUTER_AI_MODEL_ID:
+            missing_vars.append("OPENROUTER_AI_MODEL_ID")
+        if not OPENROUTER_AI_API_KEY:
+            missing_vars.append("OPENROUTER_AI_API_KEY")
+    else:
+        # Default to bedrock if not specified
+        if not APPLICATION_INFERENCE_PROFILE_ARN:
+            missing_vars.append("APPLICATION_INFERENCE_PROFILE_ARN")
     
     if missing_vars:
         error_message = f"Missing required environment variables: {', '.join(missing_vars)}"
@@ -148,17 +183,31 @@ def validate_environment_variables() -> Optional[Dict[str, Any]]:
             }]
         }
     
-    # Validate APPLICATION_INFERENCE_PROFILE_ARN format
-    if APPLICATION_INFERENCE_PROFILE_ARN and not APPLICATION_INFERENCE_PROFILE_ARN.startswith("arn:aws:bedrock:"):
-        error_message = "APPLICATION_INFERENCE_PROFILE_ARN must be a valid Bedrock ARN"
-        logger.error(error_message)
-        return {
-            "errors": [{
-                "message": "Invalid Bedrock ARN configuration",
-                "details": error_message,
-                "error_code": "CONFIGURATION_ERROR"
-            }]
-        }
+    # Validate Bedrock configuration if using bedrock provider
+    if MODEL_PROVIDER == "bedrock" or not MODEL_PROVIDER:
+        if APPLICATION_INFERENCE_PROFILE_ARN and not APPLICATION_INFERENCE_PROFILE_ARN.startswith("arn:aws:bedrock:"):
+            error_message = "APPLICATION_INFERENCE_PROFILE_ARN must be a valid Bedrock ARN"
+            logger.error(error_message)
+            return {
+                "errors": [{
+                    "message": "Invalid Bedrock ARN configuration",
+                    "details": error_message,
+                    "error_code": "CONFIGURATION_ERROR"
+                }]
+            }
+    
+    # Validate OpenRouter configuration if using openrouter provider
+    if MODEL_PROVIDER == "openrouter":
+        if OPENROUTER_AI_URL and not OPENROUTER_AI_URL.startswith(("http://", "https://")):
+            error_message = "OPENROUTER_AI_URL must start with http:// or https://"
+            logger.error(error_message)
+            return {
+                "errors": [{
+                    "message": "Invalid OpenRouter URL configuration",
+                    "details": error_message,
+                    "error_code": "CONFIGURATION_ERROR"
+                }]
+            }
     
     logger.info("Environment variable validation successful")
     return None
@@ -1279,11 +1328,11 @@ def invoke_bedrock_agent(
     weather_data: Dict[str, Any]
 ) -> Dict[str, Any]:
     """
-    Invoke Bedrock agent to analyze laundry image with weather context.
+    Invoke AI agent to analyze laundry image with weather context.
     
-    This function sends the camera image and weather data to AWS Bedrock for AI-powered
-    analysis. The Bedrock agent detects laundry racks in open air areas, assesses weather
-    risks, and provides bilingual recommendations.
+    This function sends the camera image and weather data to the configured AI model
+    (Bedrock or OpenRouter) for analysis. The agent detects laundry racks in open air
+    areas, assesses weather risks, and provides bilingual recommendations.
     
     Note: The weather_data parameter receives the internal format (current_hour/next_hour
     structure), not the raw Home Assistant weather_forecast format. The weather_forecast
@@ -1325,29 +1374,47 @@ def invoke_bedrock_agent(
         }
     """
     try:
-        logger.info(f"Initializing Bedrock agent with model: {APPLICATION_INFERENCE_PROFILE_ARN}")
-        
-        # Create boto3 session for Bedrock
-        boto3_session = boto3.Session(region_name=BEDROCK_REGION)
-        
-        # Initialize Bedrock model with timeout and retry configuration
-        bedrock_model = BedrockModel(
-            model_id=APPLICATION_INFERENCE_PROFILE_ARN,
-            boto_session=boto3_session,
-            cache_prompt="default",
-            boto_client_config=BotocoreConfig(
-                connect_timeout=10,  # Connection timeout
-                read_timeout=60,     # Read timeout for inference
-                retries={
-                    'max_attempts': 3,
-                    'mode': 'adaptive'
+        # Initialize model based on MODEL_PROVIDER
+        if MODEL_PROVIDER == "bedrock":
+            logger.info(f"Initializing Bedrock agent with model: {APPLICATION_INFERENCE_PROFILE_ARN}")
+            
+            # Create boto3 session for Bedrock
+            boto3_session = boto3.Session(region_name=BEDROCK_REGION)
+            
+            # Initialize Bedrock model with timeout and retry configuration
+            model = BedrockModel(
+                model_id=APPLICATION_INFERENCE_PROFILE_ARN,
+                boto_session=boto3_session,
+                cache_prompt="default",
+                boto_client_config=BotocoreConfig(
+                    connect_timeout=10,  # Connection timeout
+                    read_timeout=60,     # Read timeout for inference
+                    retries={
+                        'max_attempts': 3,
+                        'mode': 'adaptive'
+                    }
+                ),
+            )
+        else:
+            logger.info(f"Initializing OpenRouter agent with model: {OPENROUTER_AI_MODEL_ID}")
+            
+            # Initialize OpenRouter model
+            model = OpenAIModel(
+                client_args={
+                    "base_url": OPENROUTER_AI_URL,
+                    "api_key": OPENROUTER_AI_API_KEY,
+                },
+                model_id=OPENROUTER_AI_MODEL_ID,
+                params={
+                    "reasoning": {
+                        "enabled": True
+                    }
                 }
-            ),
-        )
+            )
         
         # Create agent with system prompt
         agent = Agent(
-            model=bedrock_model,
+            model=model,
             system_prompt=LAUNDRY_MONITORING_SYSTEM_PROMPT,
         )
         
@@ -1380,15 +1447,15 @@ def invoke_bedrock_agent(
             }
         ]
         
-        logger.info("Invoking Bedrock model for laundry analysis...")
+        logger.info(f"Invoking {MODEL_PROVIDER or 'bedrock'} model for laundry analysis...")
         
-        # Invoke Bedrock with structured output
+        # Invoke model with structured output
         result = agent.structured_output(
             output_model=LocalizedLaundryAnalysisResponse,
             prompt=agent_input
         )
         
-        logger.info("Successfully received structured output from Bedrock")
+        logger.info(f"Successfully received structured output from {MODEL_PROVIDER or 'bedrock'}")
         
         return {
             "result": result

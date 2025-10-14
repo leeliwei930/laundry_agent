@@ -3,6 +3,7 @@ from typing import Any, Dict
 from botocore.config import Config as BotocoreConfig
 from strands import Agent
 from strands.models import BedrockModel
+from strands.models.openai import OpenAIModel
 from strands.types.agent import AgentInput
 from models.analyze_response import LocalisedAnalyseResponse
 from boto3_type_annotations import s3
@@ -20,6 +21,11 @@ R2_ACCESS_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID")
 R2_SECRET_ACCESS_KEY = os.environ.get("R2_SECRET_ACCESS_KEY")
 R2_ENDPOINT_URL = os.environ.get("R2_ENDPOINT_URL")
 R2_BUCKET_NAME = os.environ.get("R2_BUCKET_NAME")
+
+MODEL_PROVIDER=os.environ.get("MODEL_PROVIDER")
+OPENROUTER_AI_URL=os.environ.get("OPENROUTER_AI_URL")
+OPENROUTER_AI_MODEL_ID=os.environ.get("OPENROUTER_AI_MODEL_ID")
+OPENROUTER_AI_API_KEY=os.environ.get("OPENROUTER_AI_API_KEY")
 
 # Configure the root strands logger
 l = logging.getLogger("strands")
@@ -99,22 +105,36 @@ def handler(event: Dict[str, Any], _context) -> Dict[str, Any]:
         ExpiresIn=604800
     )
 
-    boto3_session = boto3.Session(
-        region_name="ap-southeast-1",
-    )
-
-    bedrock_model = BedrockModel(
-        model_id=APPLICATION_INFERENCE_PROFILE_ARN,
-        boto_session=boto3_session,
-        cache_prompt="default",
-        boto_client_config=BotocoreConfig(
-            connect_timeout=10,
-            read_timeout=60,
-        ),
-    )
+    if MODEL_PROVIDER == "bedrock":
+        boto3_session = boto3.Session(
+            region_name="ap-southeast-1",
+        )
+        model = BedrockModel(
+            model_id=APPLICATION_INFERENCE_PROFILE_ARN,
+            boto_session=boto3_session,
+            cache_prompt="default",
+            boto_client_config=BotocoreConfig(
+                connect_timeout=10,
+                read_timeout=60,
+            ),
+        )
+    else:
+        model = OpenAIModel(
+            client_args={
+                "base_url": OPENROUTER_AI_URL,
+                "api_key": OPENROUTER_AI_API_KEY,
+            },
+            # **model_config
+            model_id=OPENROUTER_AI_MODEL_ID,
+            params={
+                "reasoning": {
+                    "enabled": True
+                }
+            }
+        )
 
     agent = Agent(
-        model=bedrock_model,
+        model=model,
         system_prompt=CAMERA_MOTION_ACTIVITIES_AGENT_SYSTEM_PROMPT,
         callback_handler=custom_callback_handler,
     )
@@ -140,7 +160,7 @@ def handler(event: Dict[str, Any], _context) -> Dict[str, Any]:
         result = agent.structured_output(output_model=LocalisedAnalyseResponse, prompt=agent_input)
         return {
             "data": {
-                "result": result.model_dump(),
+                "result": result.model_dump()
             }
         }
     except Exception as e:
@@ -158,6 +178,6 @@ def handler(event: Dict[str, Any], _context) -> Dict[str, Any]:
 
 if __name__ == "__main__":
     result = handler({
-        "file_key": "camera_snapshot/20251008/180629_screenshot.jpg"
+        "file_key": "camera_snapshot/20251013/182358_screenshot.jpg"
     }, None)
-    print(json.dumps(result, indent=4))
+    print(json.dumps(result, indent=4, ensure_ascii=False))

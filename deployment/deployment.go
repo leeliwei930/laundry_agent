@@ -50,7 +50,7 @@ func main() {
 			nil,
 		),
 		MemorySize:   jsii.Number(256),
-		Timeout:      awscdk.Duration_Seconds(jsii.Number(30)),
+		Timeout:      awscdk.Duration_Seconds(jsii.Number(50)),
 		Handler:      jsii.String("security_cam_analyser_agent.handler"),
 		Runtime:      awslambda.Runtime_PYTHON_3_13(),
 		Layers:       &[]awslambda.ILayerVersion{dependenciesLayer},
@@ -62,6 +62,10 @@ func main() {
 			"R2_SECRET_ACCESS_KEY":              jsii.String(os.Getenv("R2_SECRET_ACCESS_KEY")),
 			"R2_ENDPOINT_URL":                   jsii.String(os.Getenv("R2_ENDPOINT_URL")),
 			"R2_BUCKET_NAME":                    jsii.String(os.Getenv("R2_BUCKET_NAME")),
+			"MODEL_PROVIDER":                    jsii.String(os.Getenv("MODEL_PROVIDER")),
+			"OPENROUTER_AI_API_KEY":             jsii.String(os.Getenv("OPENROUTER_AI_API_KEY")),
+			"OPENROUTER_AI_MODEL_ID":            jsii.String(os.Getenv("OPENROUTER_AI_MODEL_ID")),
+			"OPENROUTER_AI_URL":                 jsii.String(os.Getenv("OPENROUTER_AI_URL")),
 		},
 	})
 
@@ -79,7 +83,7 @@ func main() {
 			nil,
 		),
 		MemorySize:   jsii.Number(256),
-		Timeout:      awscdk.Duration_Seconds(jsii.Number(30)),
+		Timeout:      awscdk.Duration_Seconds(jsii.Number(50)),
 		Handler:      jsii.String("laundry_monitoring_agent.handler"),
 		Runtime:      awslambda.Runtime_PYTHON_3_13(),
 		Layers:       &[]awslambda.ILayerVersion{dependenciesLayer},
@@ -91,6 +95,10 @@ func main() {
 			"R2_SECRET_ACCESS_KEY":              jsii.String(os.Getenv("R2_SECRET_ACCESS_KEY")),
 			"R2_ENDPOINT_URL":                   jsii.String(os.Getenv("R2_ENDPOINT_URL")),
 			"R2_BUCKET_NAME":                    jsii.String(os.Getenv("R2_BUCKET_NAME")),
+			"MODEL_PROVIDER":                    jsii.String(os.Getenv("MODEL_PROVIDER")),
+			"OPENROUTER_AI_API_KEY":             jsii.String(os.Getenv("OPENROUTER_AI_API_KEY")),
+			"OPENROUTER_AI_MODEL_ID":            jsii.String(os.Getenv("OPENROUTER_AI_MODEL_ID")),
+			"OPENROUTER_AI_URL":                 jsii.String(os.Getenv("OPENROUTER_AI_URL")),
 		},
 	})
 
