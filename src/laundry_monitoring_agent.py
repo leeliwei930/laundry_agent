@@ -224,214 +224,46 @@ else:
     _INITIALIZATION_ERROR = None
 
 # System prompt for Bedrock agent (Task 6)
-LAUNDRY_MONITORING_SYSTEM_PROMPT = """You are a household assistant specializing in laundry monitoring for car porch areas. Your role is to analyze security camera images to detect laundry racks placed outside in open air areas and provide weather-aware recommendations to help homeowners protect their laundry from adverse weather conditions.
+LAUNDRY_MONITORING_SYSTEM_PROMPT = """You are a household laundry monitoring assistant. You analyze security camera images to detect laundry drying in open air areas (car porch, patio, balcony) and recommend actions based on the weather forecast data provided.
 
-## Image Analysis Requirements
-
-### 1. Laundry Rack Detection (Requirement 1.1)
-- Carefully examine the image for laundry racks or drying structures in open air areas
-- Look for physical structures typical of laundry racks: poles, horizontal bars, hanging mechanisms, clotheslines
-- Detect clothes, bedsheets, towels, or other fabric items hanging outdoors
-- Focus specifically on open air areas such as car porches, patios, balconies, or outdoor spaces
-- Distinguish between indoor and outdoor areas - only report laundry in open air locations
-
-### 2. Location Identification (Requirement 1.2)
-When laundry is detected, describe its location within the image using:
-- **Horizontal position**: "left side of porch", "center area", "right side"
-- **Depth/distance**: "near gate", "back of porch", "foreground", "background"
-- **Landmarks**: "near car", "by the wall", "under roof overhang", "next to pillar", "beside entrance"
-- Be specific and descriptive to help the homeowner quickly locate the laundry
-
-### 3. Item Description (Requirement 1.3)
-Describe the laundry items you observe:
-- **Item types**: clothes (shirts, pants, dresses), bedsheets, towels, blankets, undergarments
-- **Quantity**: "several items", "full rack", "a few pieces", "many items", approximate count if visible
-- **Colors**: mention distinctive colors when clearly visible (e.g., "white bedsheets", "colorful clothes")
-- **Arrangement**: "hanging on rack", "spread on line", "draped over bars"
-
-### 4. No Detection Handling (Requirement 1.4)
-- If no laundry racks or items are detected in open air areas, clearly state: "No laundry detected"
-- Distinguish between "no laundry present" and "unable to determine due to image quality"
-- Do not report laundry that is clearly indoors or under complete shelter
-
-### 5. Image Quality Assessment (Requirement 1.5)
-Evaluate image quality and adjust confidence accordingly:
-- **Poor lighting**: too dark, overexposed, shadows obscuring view
-- **Obstructions**: objects blocking the view, partial visibility
-- **Low resolution**: blurry, pixelated, insufficient detail
-- **Adverse weather in image**: fog, heavy rain, glare affecting visibility
-- Report confidence score < 0.5 for poor quality images
-- Report confidence score 0.5-0.7 for moderate quality with some limitations
-- Report confidence score > 0.7 for clear, well-lit images with good visibility
+## Image Analysis
+- Look for laundry racks, clotheslines, poles, or clothes/bedsheets/towels hanging outdoors.
+- Report only laundry in OPEN AIR areas. Do not report laundry clearly indoors or fully sheltered.
+- Note the laundry's location in the image (e.g., "left side of porch", "near gate") and use it in notification_message.
+- Judge image quality (lighting, obstructions, resolution, glare) and reflect it in confidence:
+  - 0.7-1.0: clear, well-lit image, confident detection
+  - 0.5-0.7: moderate quality with limitations
+  - 0.0-0.5: poor quality or uncertain detection
+- If no laundry is visible in open air areas, set laundry_detected=false and recommendation="no_action".
 
 ## Weather Risk Assessment
+You receive current and next hour forecasts (temperature, condition, humidity, wind speed, precipitation probability). Classify:
+- high: rain or storms forecast, precipitation probability >= 30%, or wind > 40 km/h
+- medium: cloudy, precipitation probability < 30%, wind 20-40 km/h, or temperature dropping more than 5 degrees
+- low: clear conditions, no rain, wind < 20 km/h, stable temperature
 
-### Weather Data Analysis (Requirements 2.3, 2.4, 2.5)
-You will receive weather forecast data for the current hour and next hour. Analyze:
+## Recommendations
+- Laundry detected + high risk -> "bring_inside" (urgent)
+- Laundry detected + medium risk -> "bring_inside" (cautious)
+- Laundry detected + low risk -> "leave_outside"
+- No laundry detected -> "no_action"
 
-1. **Rain and Precipitation (Requirement 2.5)**
-   - Check for rain, storms, or precipitation in current or upcoming conditions
-   - Evaluate precipitation_probability in next_hour forecast
-   - Flag as HIGH RISK if rain is forecasted or precipitation_probability ≥ 30%
-   - This is the PRIMARY risk factor for laundry
+When weather risk is uncertain, err on the side of caution and recommend bringing laundry inside.
 
-2. **Temperature Changes (Requirement 2.3)**
-   - Compare current_hour and next_hour temperatures
-   - Significant drops (>5°C) may affect drying efficiency during daytime
-   - Very high temperatures (>35°C) with low humidity are ideal for drying
-   - Consider temperature in context of time of day
+## Output
+Return a JSON object with "en" and "zh_CN" keys holding the same structure: "en" fully in natural English, "zh_CN" fully in natural Simplified Chinese. laundry_detected, weather_risk_level, recommendation, and confidence must be identical in both languages.
 
-3. **Wind Conditions (Requirement 2.4)**
-   - Moderate wind (10-20 km/h): helps drying, generally safe
-   - High wind (20-40 km/h): risk of laundry displacement, flag as MEDIUM RISK
-   - Strong wind (>40 km/h): high risk of laundry falling or damage, flag as HIGH RISK
-
-4. **Weather Conditions (Requirement 2.4)**
-   - Clear/Sunny: ideal for drying, LOW RISK
-   - Cloudy: slower drying but safe if no rain, LOW to MEDIUM RISK
-   - Rainy/Stormy: immediate risk, HIGH RISK
-   - Foggy: may affect drying, MEDIUM RISK
-
-### Risk Level Classification
-Assign one of three risk levels:
-- **low**: Clear conditions, no rain forecast, moderate wind (<20 km/h), stable temperature
-- **medium**: Cloudy, low precipitation probability (<30%), high wind (20-40 km/h), or significant temperature drops
-- **high**: Rain forecast, precipitation probability ≥30%, storms, or strong winds (>40 km/h)
-
-## Recommendation Logic
-
-### Decision Rules (Requirements 3.1-3.5)
-
-1. **High Risk + Laundry Detected (Requirement 3.1)**
-   - Recommendation: "bring_inside"
-   - Urgency: HIGH
-   - Reason: Explain the specific weather threat (rain, storm, strong wind)
-
-2. **Medium Risk + Laundry Detected**
-   - Recommendation: "bring_inside" (cautious approach)
-   - Urgency: MEDIUM
-   - Reason: Explain the potential risk factors (approaching clouds, increasing wind, temperature drop)
-
-3. **Low Risk + Laundry Detected (Requirement 3.2)**
-   - Recommendation: "leave_outside"
-   - Urgency: LOW
-   - Reason: Confirm favorable conditions for continued drying
-
-4. **No Laundry Detected (Requirement 3.5)**
-   - Recommendation: "no_action"
-   - Urgency: NONE
-   - Reason: State that no laundry was found in open air areas
-
-### Confidence Scoring (Requirement 3.6)
-Provide a confidence score (0.0-1.0) based on:
-- Image quality and visibility (primary factor)
-- Clarity of laundry detection
-- Certainty of weather risk assessment
-- Any ambiguities or limitations
-
-**Confidence Guidelines:**
-- 0.9-1.0: Excellent image quality, clear laundry detection, definitive weather assessment
-- 0.7-0.9: Good visibility, confident detection, clear weather risks
-- 0.5-0.7: Moderate quality, some limitations but reasonable assessment
-- 0.3-0.5: Poor image quality, uncertain detection, or ambiguous conditions
-- 0.0-0.3: Very poor quality, highly uncertain, or unable to make reliable assessment
-
-## Output Requirements
-
-### Bilingual Response (Requirements 5.1, 5.2, 5.3, 5.4, 5.5)
-
-You MUST provide complete analysis in BOTH languages:
-
-1. **English (en)** - Requirement 5.1
-   - All fields in clear, natural English
-   - Use standard terminology
-   - Professional but friendly tone
-
-2. **Simplified Chinese (zh_CN)** - Requirement 5.2
-   - All fields translated to Simplified Chinese (简体中文)
-   - Maintain consistent meaning across languages (Requirement 5.4)
-   - Use natural, conversational Chinese appropriate for household context
-   - For technical weather terms, use standard Chinese meteorological terminology
-   - If a term cannot be translated naturally, use the English term with Chinese explanation (Requirement 5.5)
-
-### Response Structure (Requirement 4)
-
-Return a JSON object with this exact structure:
-
-```json
+Each language object contains:
 {
-  "en": {
-    "laundry_detected": boolean,
-    "laundry_description": "string - detailed description of laundry location and items, or 'No laundry detected'",
-    "weather_risk_level": "low|medium|high",
-    "weather_summary": "string - brief summary of current and upcoming weather conditions (max 50 words)",
-    "recommendation": "bring_inside|leave_outside|no_action",
-    "recommendation_reason": "string - explanation for the recommendation referencing specific weather factors (max 100 words)",
-    "notification_title": "string - concise, actionable title for push notifications (max 60 characters)",
-    "notification_message": "string - clear, informative message for mobile notifications (max 200 characters)",
-    "confidence": float (0.0-1.0),
-    "timestamp": "ISO 8601 timestamp of analysis",
-    "image_url": "presigned URL of analyzed image"
-  },
-  "zh_CN": {
-    "laundry_detected": boolean,
-    "laundry_description": "string - 衣物位置和类型的详细描述，或'未检测到晾晒衣物'",
-    "weather_risk_level": "low|medium|high",
-    "weather_summary": "string - 当前和未来天气状况的简要总结（最多50字）",
-    "recommendation": "bring_inside|leave_outside|no_action",
-    "recommendation_reason": "string - 建议的解释，引用具体天气因素（最多100字）",
-    "notification_title": "string - 简洁、可操作的推送通知标题（最多60字符）",
-    "notification_message": "string - 清晰、信息丰富的移动通知消息（最多200字符）",
-    "confidence": float (0.0-1.0),
-    "timestamp": "ISO 8601 时间戳",
-    "image_url": "已分析图像的预签名URL"
-  }
-}
-```
-
-### Field Requirements (Requirements 4.2-4.10)
-
-- **laundry_detected** (Requirement 4.2): Boolean indicating presence of laundry in open air
-- **laundry_description** (Requirement 4.3): Detailed description including location and items, or "No laundry detected"
-- **weather_risk_level** (Requirement 4.4): One of "low", "medium", "high"
-- **weather_summary**: Concise weather overview (max 50 words)
-- **recommendation** (Requirement 4.5): One of "bring_inside", "leave_outside", "no_action"
-- **recommendation_reason**: Clear explanation with specific weather factors (max 100 words)
-- **notification_title** (Requirement 4.9): Concise, actionable title for push notifications (max 60 characters). Use emojis when appropriate (⚠️, 🌧️, ✅, ℹ️). Examples: "⚠️ Bring Laundry Inside!", "✅ Laundry Safe Outside", "ℹ️ No Action Needed"
-- **notification_message** (Requirement 4.10): Clear, informative message for mobile notifications (max 200 characters). Include key details: weather risk, laundry location, and urgency. Examples: "Rain forecasted in 1 hour (65% chance). Laundry detected on left side of porch.", "Clear weather ahead. Laundry on porch can continue drying safely."
-- **confidence** (Requirement 4.6): Float between 0.0 and 1.0
-- **timestamp** (Requirement 4.7): Current time in ISO 8601 format (will be added by system)
-- **image_url** (Requirement 4.8): Presigned URL (will be added by system)
-
-## Analysis Approach
-
-1. **Examine the image carefully** for laundry racks and items in open air areas
-2. **Describe what you see** with specific location and item details
-3. **Analyze the weather data** provided for current and next hour
-4. **Assess the risk level** based on precipitation, wind, temperature, and conditions
-5. **Make a recommendation** following the decision rules above
-6. **Create notification content** that is concise and actionable:
-   - Title: Clear action or status (max 60 chars) with appropriate emoji
-   - Message: Key details about weather and laundry location (max 200 chars)
-7. **Assign confidence** based on image quality and certainty
-8. **Provide complete bilingual output** in both English and Simplified Chinese
-9. **Be specific and actionable** - homeowners need clear guidance
-
-### Notification Content Guidelines
-
-**For High Risk (bring_inside)**:
-- Title: Use ⚠️ emoji, urgent action verb (e.g., "⚠️ Bring Laundry Inside!", "⚠️ 快收衣服！")
-- Message: State weather threat, probability, and laundry location
-
-**For Low Risk (leave_outside)**:
-- Title: Use ✅ emoji, reassuring message (e.g., "✅ Laundry Safe Outside", "✅ 衣物可继续晾晒")
-- Message: Confirm safe conditions and location
-
-**For No Action (no_action)**:
-- Title: Use ℹ️ emoji, informative (e.g., "ℹ️ No Action Needed", "ℹ️ 无需操作")
-- Message: State no laundry detected
-
-Remember: Your primary goal is to help homeowners protect their laundry from getting wet or damaged. When in doubt about weather risks, err on the side of caution and recommend bringing laundry inside."""
+  "laundry_detected": true/false,
+  "weather_risk_level": "low" | "medium" | "high",
+  "weather_summary": "current and next hour conditions, max 50 words",
+  "recommendation": "bring_inside" | "leave_outside" | "no_action",
+  "recommendation_reason": "explanation citing specific weather factors, max 100 words",
+  "notification_title": "actionable title, max 60 characters, with an emoji: warning sign for bring_inside, check mark for leave_outside, info for no_action",
+  "notification_message": "weather threat with probability, laundry location, and urgency, max 200 characters",
+  "confidence": 0.0-1.0
+}"""
 
 
 def validate_forecast_item(forecast_item: Dict[str, Any], item_name: str) -> Optional[Dict[str, str]]:
@@ -1324,7 +1156,6 @@ def generate_presigned_url(file_key: str, expiration: int = 604800) -> Dict[str,
 def invoke_bedrock_agent(
     image_bytes: bytes,
     image_format: str,
-    presigned_url: str,
     weather_data: Dict[str, Any]
 ) -> Dict[str, Any]:
     """
@@ -1341,7 +1172,6 @@ def invoke_bedrock_agent(
     Args:
         image_bytes: Raw image bytes from R2 storage
         image_format: Image format (e.g., 'jpeg', 'png')
-        presigned_url: Presigned URL for the image (included in response)
         weather_data: Weather data in internal format with current_hour and next_hour:
             {
                 "current_hour": {
@@ -1422,10 +1252,9 @@ def invoke_bedrock_agent(
         weather_description = format_weather_data_for_prompt(weather_data)
         logger.info(f"Weather context: {weather_description}")
         
-        # Generate current timestamp in ISO 8601 format
-        current_timestamp = datetime.now(timezone.utc).isoformat()
-        
         # Prepare agent input with image and weather context
+        # (timestamp and image URL are injected post-analysis by the handler,
+        # not generated by the model, to reduce output tokens)
         agent_input: AgentInput = [
             {
                 "text": "Analyze the following security camera image for laundry racks in open air areas.",
@@ -1438,12 +1267,6 @@ def invoke_bedrock_agent(
             },
             {
                 "text": f"Weather forecast data: {weather_description}"
-            },
-            {
-                "text": f"Current timestamp: {current_timestamp}"
-            },
-            {
-                "text": f"Image source URL: {presigned_url}"
             }
         ]
         
@@ -1540,230 +1363,55 @@ def invoke_bedrock_agent(
         }
 
 
-def validate_and_enrich_response(
-    bedrock_response: LocalizedLaundryAnalysisResponse,
-    presigned_url: str
+def validate_response(
+    bedrock_response: LocalizedLaundryAnalysisResponse
 ) -> Dict[str, Any]:
     """
-    Validate Bedrock response and enrich with presigned URL and timestamp.
-    
-    This function implements Task 8: Response validation and parsing.
-    It validates the Bedrock response against Pydantic models, verifies
-    timestamp format and confidence score range, and adds the presigned URL.
-    
+    Validate the agent's structured response.
+
+    The Pydantic model already enforces field presence, types, enum values,
+    and the confidence range via structured output. This function checks
+    cross-language consistency between the English and Simplified Chinese
+    localizations.
+
     Args:
-        bedrock_response: Pydantic model instance from Bedrock structured output
-        presigned_url: Presigned URL to add to the response
-    
+        bedrock_response: Pydantic model instance from structured output
+
     Returns:
-        Dict containing validated and enriched response or error information
+        Dict containing the validated response, or error information
     """
     try:
-        logger.info("Validating and enriching Bedrock response...")
-        
-        # Generate current timestamp in ISO 8601 format
-        current_timestamp = datetime.now(timezone.utc).isoformat()
-        logger.debug(f"Generated timestamp: {current_timestamp}")
-        
-        # The bedrock_response is already a Pydantic model instance from structured_output,
-        # so basic validation has already occurred. However, we need to:
-        # 1. Verify the response structure is complete
-        # 2. Add presigned URL to both language versions
-        # 3. Update timestamp to current time
-        # 4. Perform additional validation checks
-        
-        # Validate English response
-        if not hasattr(bedrock_response, 'en') or bedrock_response.en is None:
-            logger.error("Missing English localization in response")
-            return {
-                "error": {
-                    "message": "Invalid Bedrock response",
-                    "details": "Missing English (en) localization in response",
-                    "error_code": "VALIDATION_ERROR"
-                }
-            }
-        
-        # Validate Chinese response
-        if not hasattr(bedrock_response, 'zh_CN') or bedrock_response.zh_CN is None:
-            logger.error("Missing Chinese localization in response")
-            return {
-                "error": {
-                    "message": "Invalid Bedrock response",
-                    "details": "Missing Simplified Chinese (zh_CN) localization in response",
-                    "error_code": "VALIDATION_ERROR"
-                }
-            }
-        
-        # Validate and enrich English response
+        logger.info("Validating agent response...")
+
         en_response = bedrock_response.en
-        
-        # Verify required fields are present
-        required_fields = [
-            'laundry_detected', 'laundry_description', 'weather_risk_level',
-            'weather_summary', 'recommendation', 'recommendation_reason', 'confidence'
-        ]
-        
-        for field in required_fields:
-            if not hasattr(en_response, field):
-                logger.error(f"Missing required field in English response: {field}")
-                return {
-                    "error": {
-                        "message": "Invalid Bedrock response",
-                        "details": f"Missing required field in English response: {field}",
-                        "error_code": "VALIDATION_ERROR"
-                    }
-                }
-        
-        # Verify confidence score is in valid range (0.0-1.0)
-        if not isinstance(en_response.confidence, (int, float)):
-            logger.error(f"Invalid confidence type: {type(en_response.confidence)}")
-            return {
-                "error": {
-                    "message": "Invalid confidence score",
-                    "details": f"Confidence must be a number, got {type(en_response.confidence).__name__}",
-                    "error_code": "VALIDATION_ERROR"
-                }
-            }
-        
-        if not 0.0 <= en_response.confidence <= 1.0:
-            logger.error(f"Confidence score out of range: {en_response.confidence}")
-            return {
-                "error": {
-                    "message": "Invalid confidence score",
-                    "details": f"Confidence must be between 0.0 and 1.0, got {en_response.confidence}",
-                    "error_code": "VALIDATION_ERROR"
-                }
-            }
-        
-        logger.debug(f"English response confidence validated: {en_response.confidence}")
-        
-        # Verify timestamp format (ISO 8601)
-        # The Pydantic validator already checks this, but we'll verify it's present
-        if hasattr(en_response, 'timestamp') and en_response.timestamp:
-            try:
-                # Verify it can be parsed as ISO 8601
-                datetime.fromisoformat(en_response.timestamp.replace('Z', '+00:00'))
-                logger.debug(f"English response timestamp validated: {en_response.timestamp}")
-            except (ValueError, AttributeError) as e:
-                logger.error(f"Invalid timestamp format in English response: {en_response.timestamp}")
-                return {
-                    "error": {
-                        "message": "Invalid timestamp format",
-                        "details": f"Timestamp must be in ISO 8601 format, got '{en_response.timestamp}': {str(e)}",
-                        "error_code": "VALIDATION_ERROR"
-                    }
-                }
-        
-        # Update English response with presigned URL and current timestamp
-        en_response.image_url = presigned_url
-        en_response.timestamp = current_timestamp
-        logger.debug("Updated English response with presigned URL and timestamp")
-        
-        # Validate and enrich Chinese response
         zh_response = bedrock_response.zh_CN
-        
-        # Verify required fields are present in Chinese response
-        for field in required_fields:
-            if not hasattr(zh_response, field):
-                logger.error(f"Missing required field in Chinese response: {field}")
-                return {
-                    "error": {
-                        "message": "Invalid Bedrock response",
-                        "details": f"Missing required field in Chinese response: {field}",
-                        "error_code": "VALIDATION_ERROR"
-                    }
-                }
-        
-        # Verify confidence score in Chinese response
-        if not isinstance(zh_response.confidence, (int, float)):
-            logger.error(f"Invalid confidence type in Chinese response: {type(zh_response.confidence)}")
-            return {
-                "error": {
-                    "message": "Invalid confidence score",
-                    "details": f"Confidence in Chinese response must be a number, got {type(zh_response.confidence).__name__}",
-                    "error_code": "VALIDATION_ERROR"
-                }
-            }
-        
-        if not 0.0 <= zh_response.confidence <= 1.0:
-            logger.error(f"Confidence score out of range in Chinese response: {zh_response.confidence}")
-            return {
-                "error": {
-                    "message": "Invalid confidence score",
-                    "details": f"Confidence in Chinese response must be between 0.0 and 1.0, got {zh_response.confidence}",
-                    "error_code": "VALIDATION_ERROR"
-                }
-            }
-        
-        logger.debug(f"Chinese response confidence validated: {zh_response.confidence}")
-        
-        # Verify timestamp format in Chinese response
-        if hasattr(zh_response, 'timestamp') and zh_response.timestamp:
-            try:
-                datetime.fromisoformat(zh_response.timestamp.replace('Z', '+00:00'))
-                logger.debug(f"Chinese response timestamp validated: {zh_response.timestamp}")
-            except (ValueError, AttributeError) as e:
-                logger.error(f"Invalid timestamp format in Chinese response: {zh_response.timestamp}")
-                return {
-                    "error": {
-                        "message": "Invalid timestamp format",
-                        "details": f"Timestamp in Chinese response must be in ISO 8601 format, got '{zh_response.timestamp}': {str(e)}",
-                        "error_code": "VALIDATION_ERROR"
-                    }
-                }
-        
-        # Update Chinese response with presigned URL and current timestamp
-        zh_response.image_url = presigned_url
-        zh_response.timestamp = current_timestamp
-        logger.debug("Updated Chinese response with presigned URL and timestamp")
-        
-        # Verify both responses have consistent boolean and enum values
+
+        # Verify both localizations agree on language-independent values
         if en_response.laundry_detected != zh_response.laundry_detected:
             logger.warning("Laundry detection mismatch between English and Chinese responses")
-        
+
         if en_response.weather_risk_level != zh_response.weather_risk_level:
             logger.warning("Weather risk level mismatch between English and Chinese responses")
-        
+
         if en_response.recommendation != zh_response.recommendation:
             logger.warning("Recommendation mismatch between English and Chinese responses")
-        
-        logger.info("Response validation and enrichment completed successfully")
-        
-        # Return the validated and enriched response
+
+        logger.info("Response validation completed successfully")
+
         return {
             "validated_response": bedrock_response
         }
-        
+
     except AttributeError as e:
-        logger.error(f"Missing attribute in Bedrock response: {str(e)}", exc_info=True)
+        logger.error(f"Missing attribute in agent response: {str(e)}", exc_info=True)
         return {
             "error": {
-                "message": "Invalid Bedrock response structure",
+                "message": "Invalid agent response structure",
                 "details": f"Response is missing required attributes: {str(e)}",
                 "error_code": "VALIDATION_ERROR"
             }
         }
-    
-    except TypeError as e:
-        logger.error(f"Type error in Bedrock response: {str(e)}", exc_info=True)
-        return {
-            "error": {
-                "message": "Invalid data types in Bedrock response",
-                "details": f"Response contains invalid data types: {str(e)}",
-                "error_code": "VALIDATION_ERROR"
-            }
-        }
-    
-    except ValueError as e:
-        logger.error(f"Value error in Bedrock response: {str(e)}", exc_info=True)
-        return {
-            "error": {
-                "message": "Invalid values in Bedrock response",
-                "details": f"Response contains invalid values: {str(e)}",
-                "error_code": "VALIDATION_ERROR"
-            }
-        }
-    
+
     except Exception as e:
         logger.error(f"Unexpected error during response validation: {str(e)}", exc_info=True)
         return {
@@ -1789,7 +1437,7 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
     3. Retrieves the camera image from R2 storage
     4. Generates a presigned URL for the image
     5. Invokes Bedrock AI agent for laundry detection and risk assessment
-    6. Validates and enriches the response with bilingual localizations
+    6. Validates the response and injects timestamp and image URL
     7. Returns structured JSON with recommendations in English and Simplified Chinese
     
     This function implements comprehensive error handling with structured error responses,
@@ -1811,7 +1459,6 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
                 "result": {
                     "en": {
                         "laundry_detected": bool,
-                        "laundry_description": str,
                         "weather_risk_level": "low|medium|high",
                         "weather_summary": str,
                         "recommendation": "bring_inside|leave_outside|no_action",
@@ -2012,7 +1659,6 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
             bedrock_result = invoke_bedrock_agent(
                 image_bytes=image_bytes,
                 image_format=image_format,
-                presigned_url=presigned_url,
                 weather_data=weather_data
             )
             
@@ -2036,10 +1682,9 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         
         # Task 10: Response validation with comprehensive error handling
         try:
-            # Task 8: Validate and enrich response
-            validation_result = validate_and_enrich_response(
-                bedrock_response=analysis_result,
-                presigned_url=presigned_url
+            # Task 8: Validate the response
+            validation_result = validate_response(
+                bedrock_response=analysis_result
             )
             
             # Check for validation errors
@@ -2061,34 +1706,27 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         
         # Task 10: Response formatting with comprehensive error handling
         try:
-            # Task 9: Format success response with data.result structure
-            # This implements the success response formatting as specified in the design document.
-            # 
-            # Requirements addressed:
-            # - Requirement 5.1: English localization included in response
-            # - Requirement 5.2: Simplified Chinese localization included in response
-            # - Requirement 6.3: Return HTTP 200 status with structured JSON
-            #
-            # Response structure:
-            # {
-            #     "data": {
-            #         "result": {
-            #             "en": { ... },      # English localization
-            #             "zh_CN": { ... }    # Simplified Chinese localization
-            #         }
-            #     }
-            # }
-            #
-            # Both language versions are always included in every response, ensuring
-            # all household members can understand the recommendations regardless of
-            # their preferred language.
-            
-            # Convert Pydantic models to dictionaries for JSON serialization
+            # Task 9: Format success response with data.result structure.
+            # Both language versions are always included in every response
+            # (Requirements 5.1, 5.2), returned as structured JSON (Requirement 6.3).
+
+            # timestamp and image_url are identical across languages and were
+            # not generated by the model (saves output tokens) — inject them here.
+            current_timestamp = datetime.now(timezone.utc).isoformat()
+
+            en_result = validated_response.en.model_dump()
+            en_result["timestamp"] = current_timestamp
+            en_result["image_url"] = presigned_url
+
+            zh_result = validated_response.zh_CN.model_dump()
+            zh_result["timestamp"] = current_timestamp
+            zh_result["image_url"] = presigned_url
+
             success_response = {
                 "data": {
                     "result": {
-                        "en": validated_response.en.model_dump(),
-                        "zh_CN": validated_response.zh_CN.model_dump()
+                        "en": en_result,
+                        "zh_CN": zh_result
                     }
                 }
             }
