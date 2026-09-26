@@ -1,2 +1,5 @@
 build/
 pkg/
+.env
+.venv/
+__pycache__/

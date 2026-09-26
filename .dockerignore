@@ -1,0 +1,11 @@
+.venv
+build
+__pycache__
+**/__pycache__
+.git
+.kiro
+deployment
+*.md
+.env
+.python-version
+.pytest_cache
